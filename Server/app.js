@@ -28,13 +28,20 @@ const io = new Server(server, {
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
-  socket.on("join-room", (roomId) => {
+  socket.on("join-room", async (roomId) => {
     socket.join(roomId);
     console.log(`User ${socket.id} joined room ${roomId}`);
+
+    const room = await Room.findOne({ roomId });
+    if (room) {
+      socket.emit("code-update", room.code);
+    }
   });
 
   // code sync
-  socket.on("code-change", ({ roomId, code }) => {
+  socket.on("code-change", async ({ roomId, code }) => {
+    await Room.findOneAndUpdate({ roomId }, { code }, { upsert: true });
+
     socket.to(roomId).emit("code-update", code);
   });
 
@@ -42,6 +49,26 @@ io.on("connection", (socket) => {
     console.log("User disconnected:", socket.id);
   });
 });
+
+const mongoose = require("mongoose"); // Move this to the top, before using mongoose
+
+mongoose
+  .connect(
+    "mongodb+srv://sohambhattacharjee84:2003@cluster0.ohqp9.mongodb.net/syncide"
+  )
+  .then(() => {
+    console.log("MongoDB connected");
+  })
+  .catch((err) => {
+    console.error(err);
+  });
+
+const RoomSchema = new mongoose.Schema({
+  roomId: { type: String, unique: true },
+  code: { type: String },
+});
+
+const Room = mongoose.model("Room", RoomSchema);
 
 // start server
 const PORT = 5000;
