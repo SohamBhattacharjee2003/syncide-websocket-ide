@@ -1,1 +1,11 @@
 @import "tailwindcss";
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("/noise.png");
+  opacity: 0.04;
+  pointer-events: none;
+  z-index: 0;
+}
