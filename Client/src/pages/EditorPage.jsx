@@ -10,6 +10,12 @@ import EditorPane from "../components/editor/EditorPane";
 import RightPanel from "../components/editor/RightPanel";
 import StatusBar from "../components/editor/StatusBar";
 import Terminal from "../components/editor/Terminal";
+import VideoCall from "../components/editor/VideoCall";
+import VideoSidePanel from "../components/editor/VideoSidePanel";
+import PreJoinScreen from "../components/editor/PreJoinScreen";
+
+// Hooks
+import useWebRTC from "../hooks/useWebRTC";
 
 // Sample users for demo - in production, these come from socket
 const mockUsers = [
@@ -249,7 +255,31 @@ export default function EditorPage() {
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   
+  // Video call state
+  const [showPreJoin, setShowPreJoin] = useState(false);
+  const [showVideoCall, setShowVideoCall] = useState(false);
+  const [isVideoPanelOpen, setIsVideoPanelOpen] = useState(true);
+  const [isInCall, setIsInCall] = useState(false);
+  const [userName] = useState("Alex Johnson"); // In production, get from auth
+  
   const saveTimeout = useRef(null);
+
+  // WebRTC Hook
+  const {
+    localStream,
+    screenStream,
+    remoteStreams,
+    isCameraOn,
+    isMicOn,
+    isScreenSharing,
+    startCamera,
+    stopCamera,
+    toggleCamera,
+    toggleMic,
+    startScreenShare,
+    stopScreenShare,
+    cleanup: cleanupWebRTC,
+  } = useWebRTC({ roomId, socket, userName });
 
   // Socket connection
   useEffect(() => {
@@ -356,6 +386,45 @@ export default function EditorPage() {
     socket.emit("cursor-move", { roomId, position });
   }, [roomId]);
 
+  // Video call handlers
+  const handleToggleVideoCall = useCallback(() => {
+    if (isInCall) {
+      // Open fullscreen video call view
+      setShowVideoCall(true);
+    } else {
+      // Show pre-join screen
+      setShowPreJoin(true);
+    }
+  }, [isInCall]);
+
+  const handleJoinCall = useCallback(async ({ stream, isCameraOn: camOn, isMicOn: micOn }) => {
+    setShowPreJoin(false);
+    setIsInCall(true);
+    setIsVideoPanelOpen(true);
+    
+    // Notify others
+    socket.emit("join-video-call", { roomId, userName });
+  }, [roomId, userName]);
+
+  const handleEndCall = useCallback(() => {
+    cleanupWebRTC();
+    setIsInCall(false);
+    setShowVideoCall(false);
+    
+    // Notify others
+    socket.emit("leave-video-call", { roomId, userName });
+  }, [roomId, userName, cleanupWebRTC]);
+
+  const handleStartCall = useCallback(async () => {
+    try {
+      await startCamera();
+      setIsInCall(true);
+      socket.emit("join-video-call", { roomId, userName });
+    } catch (error) {
+      console.error("Failed to start call:", error);
+    }
+  }, [roomId, userName, startCamera]);
+
   return (
     <div className="h-screen flex flex-col bg-[#030303] overflow-hidden">
       {/* Background Effects */}
@@ -395,6 +464,8 @@ export default function EditorPage() {
         language={language.charAt(0).toUpperCase() + language.slice(1)}
         onLanguageChange={handleLanguageChange}
         fileName={fileName}
+        isInCall={isInCall}
+        onToggleVideoCall={handleToggleVideoCall}
       />
 
       {/* Main Content */}
@@ -416,7 +487,7 @@ export default function EditorPage() {
               onCursorChange={handleCursorChange}
             />
 
-            {/* Right Panel - Responsive */}
+            {/* Right Panel - Users/Chat */}
             <AnimatePresence>
               <div className="hidden md:flex">
                 <RightPanel
@@ -428,6 +499,29 @@ export default function EditorPage() {
                 />
               </div>
             </AnimatePresence>
+
+            {/* Video Side Panel */}
+            <div className="hidden md:flex">
+              <VideoSidePanel
+                isOpen={isVideoPanelOpen}
+                onToggle={() => setIsVideoPanelOpen(!isVideoPanelOpen)}
+                localStream={localStream}
+                remoteStreams={remoteStreams}
+                isCameraOn={isCameraOn}
+                isMicOn={isMicOn}
+                isScreenSharing={isScreenSharing}
+                onToggleCamera={toggleCamera}
+                onToggleMic={toggleMic}
+                onStartScreenShare={startScreenShare}
+                onStopScreenShare={stopScreenShare}
+                onStartCall={handleStartCall}
+                onEndCall={handleEndCall}
+                onOpenFullscreen={() => setShowVideoCall(true)}
+                isInCall={isInCall}
+                users={users}
+                userName={userName}
+              />
+            </div>
           </div>
 
           {/* Terminal */}
@@ -493,6 +587,39 @@ export default function EditorPage() {
             onClick={() => setIsRightPanelCollapsed(true)}
           />
         )}
+      </AnimatePresence>
+
+      {/* Pre-Join Screen Modal */}
+      <AnimatePresence>
+        <PreJoinScreen
+          isOpen={showPreJoin}
+          onClose={() => setShowPreJoin(false)}
+          onJoin={handleJoinCall}
+          userName={userName}
+          roomId={roomId}
+        />
+      </AnimatePresence>
+
+      {/* Full Screen Video Call */}
+      <AnimatePresence>
+        <VideoCall
+          isOpen={showVideoCall}
+          onClose={() => setShowVideoCall(false)}
+          localStream={localStream}
+          screenStream={screenStream}
+          remoteStreams={remoteStreams}
+          isCameraOn={isCameraOn}
+          isMicOn={isMicOn}
+          isScreenSharing={isScreenSharing}
+          onToggleCamera={toggleCamera}
+          onToggleMic={toggleMic}
+          onStartScreenShare={startScreenShare}
+          onStopScreenShare={stopScreenShare}
+          onStartCall={handleStartCall}
+          onEndCall={handleEndCall}
+          users={users}
+          userName={userName}
+        />
       </AnimatePresence>
     </div>
   );

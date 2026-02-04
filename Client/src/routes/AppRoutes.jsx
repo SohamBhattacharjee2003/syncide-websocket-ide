@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import LandingPage from "../pages/LandingPage";
-import EditorPage from "../pages/EditorPage";
+import EditorPage from "../pages/EditorPageNew";
 
 // Generate a random room ID
 const generateRoomId = () => {

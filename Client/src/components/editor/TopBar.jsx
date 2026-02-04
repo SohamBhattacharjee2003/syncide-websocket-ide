@@ -5,13 +5,14 @@ import {
   VscSignOut,
   VscBroadcast,
   VscChevronDown,
-  VscTerminal,
   VscPlay,
   VscSave,
   VscEllipsis,
   VscSplitHorizontal,
 } from "react-icons/vsc";
+import { HiOutlineVideoCamera, HiOutlineVideoCameraSlash } from "react-icons/hi2";
 import UserAvatar from "./UserAvatar";
+import logoImg from "../../assets/logo.png";
 
 export default function TopBar({ 
   roomId, 
@@ -21,7 +22,9 @@ export default function TopBar({
   onRun,
   language = "JavaScript",
   onLanguageChange,
-  fileName = "untitled.js"
+  fileName = "untitled.js",
+  isInCall = false,
+  onToggleVideoCall,
 }) {
   const [copied, setCopied] = useState(false);
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
@@ -62,13 +65,22 @@ export default function TopBar({
           whileHover={{ scale: 1.02 }}
         >
           <motion.div
-            className="w-7 h-7 md:w-8 md:h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center"
+            className="w-7 h-7 md:w-8 md:h-8 rounded-lg overflow-hidden flex items-center justify-center"
             animate={{ 
+              rotate: 360,
               boxShadow: ["0 0 10px rgba(16,185,129,0.3)", "0 0 20px rgba(16,185,129,0.5)", "0 0 10px rgba(16,185,129,0.3)"]
             }}
-            transition={{ duration: 2, repeat: Infinity }}
+            transition={{ 
+              rotate: { duration: 8, repeat: Infinity, ease: "linear" },
+              boxShadow: { duration: 2, repeat: Infinity }
+            }}
+            whileHover={{ rotate: 0, scale: 1.1 }}
           >
-            <VscTerminal className="w-4 h-4 md:w-5 md:h-5 text-white" />
+            <motion.img 
+              src={logoImg} 
+              alt="SyncIDE" 
+              className="w-full h-full object-contain"
+            />
           </motion.div>
           <span className="font-semibold text-white text-sm md:text-base hidden sm:block">
             Sync<span className="text-emerald-400">IDE</span>
@@ -201,6 +213,25 @@ export default function TopBar({
             title="Split View"
           >
             <VscSplitHorizontal className="w-4 h-4" />
+          </motion.button>
+
+          {/* Video Call Button */}
+          <motion.button
+            onClick={onToggleVideoCall}
+            className={`p-2 rounded-lg transition-colors ${
+              isInCall 
+                ? "text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20" 
+                : "text-neutral-400 hover:text-white hover:bg-white/5"
+            }`}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            title={isInCall ? "Leave Video Call" : "Start Video Call"}
+          >
+            {isInCall ? (
+              <HiOutlineVideoCamera className="w-4 h-4" />
+            ) : (
+              <HiOutlineVideoCameraSlash className="w-4 h-4" />
+            )}
           </motion.button>
         </div>
 
