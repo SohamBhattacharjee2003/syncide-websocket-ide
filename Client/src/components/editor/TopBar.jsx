@@ -1,5 +1,6 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import {
   VscCopy,
   VscSignOut,
@@ -9,6 +10,23 @@ import {
   VscSave,
   VscEllipsis,
   VscSplitHorizontal,
+  VscAccount,
+  VscGear,
+  VscFeedback,
+  VscQuestion,
+  VscRemote,
+  VscBell,
+  VscDebugAlt,
+  VscTerminal,
+  VscColorMode,
+  VscCheck,
+  VscClose,
+  VscSync,
+  VscCloud,
+  VscCloudDownload,
+  VscCloudUpload,
+  VscHistory,
+  VscExtensions,
 } from "react-icons/vsc";
 import { HiOutlineVideoCamera, HiOutlineVideoCameraSlash } from "react-icons/hi2";
 import UserAvatar from "./UserAvatar";
@@ -25,10 +43,16 @@ export default function TopBar({
   fileName = "untitled.js",
   isInCall = false,
   onToggleVideoCall,
+  onToggleTerminal,
+  isSyncing = false,
+  lastSaved = null,
 }) {
   const [copied, setCopied] = useState(false);
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [hasNotifications, setHasNotifications] = useState(true);
 
   const languages = [
     { id: "javascript", label: "JavaScript", ext: ".js" },
@@ -184,33 +208,65 @@ export default function TopBar({
 
       {/* Right Section */}
       <div className="flex items-center gap-2 md:gap-3">
-        {/* Action Buttons */}
+        {/* Action Buttons - VS Code Style */}
         <div className="hidden md:flex items-center gap-1">
+          {/* Save Button with Status */}
           <motion.button
             onClick={onSave}
-            className="p-2 text-neutral-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+            className="p-2 text-neutral-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors relative group"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            title="Save"
+            title="Save (Ctrl+S)"
           >
             <VscSave className="w-4 h-4" />
+            {isSyncing && (
+              <motion.div
+                className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400"
+                animate={{ scale: [1, 1.2, 1] }}
+                transition={{ duration: 0.5, repeat: Infinity }}
+              />
+            )}
           </motion.button>
 
+          {/* Run Button */}
           <motion.button
             onClick={onRun}
-            className="p-2 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 rounded-lg transition-colors"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            title="Run"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 rounded-lg transition-colors"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            title="Run Code (F5)"
           >
             <VscPlay className="w-4 h-4" />
+            <span className="text-xs font-medium">Run</span>
           </motion.button>
 
+          {/* Debug Button */}
+          <motion.button
+            className="p-2 text-neutral-400 hover:text-orange-400 hover:bg-orange-500/10 rounded-lg transition-colors"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            title="Debug (Ctrl+Shift+D)"
+          >
+            <VscDebugAlt className="w-4 h-4" />
+          </motion.button>
+
+          {/* Terminal Button */}
+          <motion.button
+            onClick={onToggleTerminal}
+            className="p-2 text-neutral-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            title="Toggle Terminal (Ctrl+`)"
+          >
+            <VscTerminal className="w-4 h-4" />
+          </motion.button>
+
+          {/* Split View */}
           <motion.button
             className="p-2 text-neutral-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            title="Split View"
+            title="Split Editor (Ctrl+\\)"
           >
             <VscSplitHorizontal className="w-4 h-4" />
           </motion.button>
@@ -237,6 +293,27 @@ export default function TopBar({
 
         {/* Divider */}
         <div className="w-px h-6 bg-white/10 hidden md:block" />
+
+        {/* Sync Status */}
+        <motion.div
+          className="hidden md:flex items-center gap-1.5 px-2 py-1 rounded-lg cursor-pointer hover:bg-white/5"
+          title={isSyncing ? "Syncing..." : "All changes synced"}
+          whileHover={{ scale: 1.02 }}
+        >
+          <motion.div
+            animate={isSyncing ? { rotate: 360 } : {}}
+            transition={{ duration: 1, repeat: isSyncing ? Infinity : 0, ease: "linear" }}
+          >
+            {isSyncing ? (
+              <VscSync className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <VscCloud className="w-3.5 h-3.5 text-emerald-400" />
+            )}
+          </motion.div>
+          <span className="text-[10px] text-neutral-400">
+            {isSyncing ? "Syncing..." : lastSaved ? `Saved ${lastSaved}` : "Synced"}
+          </span>
+        </motion.div>
 
         {/* Live Indicator */}
         <motion.div
@@ -273,12 +350,153 @@ export default function TopBar({
           )}
 
           {users.length === 0 && (
-            <span className="text-xs text-neutral-500 ml-2 hidden sm:inline">No collaborators</span>
+            <span className="text-xs text-neutral-500 ml-2 hidden sm:inline">Solo</span>
           )}
         </div>
 
-        {/* More Menu */}
+        {/* Divider */}
+        <div className="w-px h-6 bg-white/10 hidden md:block" />
+
+        {/* Notifications */}
         <div className="relative">
+          <motion.button
+            onClick={() => setShowNotifications(!showNotifications)}
+            className="p-2 text-neutral-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors relative"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <VscBell className="w-4 h-4" />
+            {hasNotifications && (
+              <motion.span
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"
+              />
+            )}
+          </motion.button>
+
+          <AnimatePresence>
+            {showNotifications && (
+              <motion.div
+                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                className="absolute top-full right-0 mt-2 bg-neutral-900 border border-white/10 rounded-xl shadow-2xl w-80 z-50 overflow-hidden"
+              >
+                <div className="p-3 border-b border-white/5 flex items-center justify-between">
+                  <span className="text-sm font-medium text-white">Notifications</span>
+                  <button 
+                    onClick={() => setHasNotifications(false)}
+                    className="text-xs text-emerald-400 hover:text-emerald-300"
+                  >
+                    Mark all read
+                  </button>
+                </div>
+                <div className="max-h-64 overflow-y-auto">
+                  <NotificationItem
+                    icon={VscAccount}
+                    title="Emma joined the room"
+                    time="2 min ago"
+                    color="emerald"
+                  />
+                  <NotificationItem
+                    icon={VscCloudUpload}
+                    title="Changes synced successfully"
+                    time="5 min ago"
+                    color="blue"
+                  />
+                  <NotificationItem
+                    icon={VscExtensions}
+                    title="New extension available"
+                    time="1 hour ago"
+                    color="purple"
+                  />
+                </div>
+                <div className="p-2 border-t border-white/5">
+                  <button className="w-full text-center text-xs text-neutral-400 hover:text-white py-1">
+                    View all notifications
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Account Menu */}
+        <div className="relative">
+          <motion.button
+            onClick={() => setShowAccountMenu(!showAccountMenu)}
+            className="flex items-center gap-2 p-1.5 hover:bg-white/5 rounded-lg transition-colors"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center text-xs font-bold text-white">
+              S
+            </div>
+            <VscChevronDown className={`w-3 h-3 text-neutral-400 transition-transform hidden md:block ${showAccountMenu ? "rotate-180" : ""}`} />
+          </motion.button>
+
+          <AnimatePresence>
+            {showAccountMenu && (
+              <motion.div
+                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                className="absolute top-full right-0 mt-2 bg-neutral-900 border border-white/10 rounded-xl shadow-2xl w-64 z-50 overflow-hidden"
+              >
+                {/* User Info */}
+                <div className="p-4 border-b border-white/5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center text-sm font-bold text-white">
+                      SB
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-white truncate">Soham Bhattacharjee</p>
+                      <p className="text-xs text-neutral-400 truncate">soham@example.com</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <span className="px-2 py-0.5 text-[10px] font-medium bg-emerald-500/20 text-emerald-400 rounded-full">
+                      Pro Plan
+                    </span>
+                    <span className="text-[10px] text-neutral-500">•</span>
+                    <span className="text-[10px] text-neutral-400">{users.length + 1} online</span>
+                  </div>
+                </div>
+
+                {/* Menu Items */}
+                <div className="py-1">
+                  <Link to="/account">
+                    <AccountMenuItem icon={VscAccount} label="My Account" />
+                  </Link>
+                  <AccountMenuItem icon={VscGear} label="Settings" shortcut="Ctrl+," />
+                  <AccountMenuItem icon={VscColorMode} label="Theme" shortcut="Ctrl+K T" />
+                  <AccountMenuItem icon={VscExtensions} label="Extensions" shortcut="Ctrl+Shift+X" />
+                  <AccountMenuItem icon={VscHistory} label="Session History" />
+                </div>
+
+                <div className="border-t border-white/5 py-1">
+                  <AccountMenuItem icon={VscFeedback} label="Send Feedback" />
+                  <AccountMenuItem icon={VscQuestion} label="Help & Documentation" />
+                  <AccountMenuItem icon={VscRemote} label="Remote Connection" connected />
+                </div>
+
+                <div className="border-t border-white/5 py-1">
+                  <button 
+                    onClick={onLeaveRoom}
+                    className="w-full px-4 py-2 flex items-center gap-3 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+                  >
+                    <VscSignOut className="w-4 h-4" />
+                    <span>Leave Room</span>
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* More Menu (Mobile) */}
+        <div className="relative md:hidden">
           <motion.button
             onClick={() => setShowMoreMenu(!showMoreMenu)}
             className="p-2 text-neutral-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
@@ -296,6 +514,28 @@ export default function TopBar({
                 exit={{ opacity: 0, y: -10, scale: 0.95 }}
                 className="absolute top-full right-0 mt-1 bg-neutral-900 border border-white/10 rounded-lg shadow-xl py-1 min-w-[160px] z-50"
               >
+                <button
+                  onClick={onSave}
+                  className="w-full px-3 py-2 text-left text-sm text-neutral-300 hover:bg-white/5 flex items-center gap-2"
+                >
+                  <VscSave className="w-4 h-4" />
+                  Save
+                </button>
+                <button
+                  onClick={onRun}
+                  className="w-full px-3 py-2 text-left text-sm text-emerald-400 hover:bg-emerald-500/10 flex items-center gap-2"
+                >
+                  <VscPlay className="w-4 h-4" />
+                  Run
+                </button>
+                <button
+                  onClick={onToggleTerminal}
+                  className="w-full px-3 py-2 text-left text-sm text-neutral-300 hover:bg-white/5 flex items-center gap-2"
+                >
+                  <VscTerminal className="w-4 h-4" />
+                  Terminal
+                </button>
+                <div className="h-px bg-white/5 my-1" />
                 <button
                   onClick={copyRoomId}
                   className="w-full px-3 py-2 text-left text-sm text-neutral-300 hover:bg-white/5 flex items-center gap-2"
@@ -318,15 +558,58 @@ export default function TopBar({
       </div>
 
       {/* Background blur effect on menus */}
-      {(showLanguageMenu || showMoreMenu) && (
+      {(showLanguageMenu || showMoreMenu || showAccountMenu || showNotifications) && (
         <div
           className="fixed inset-0 z-40"
           onClick={() => {
             setShowLanguageMenu(false);
             setShowMoreMenu(false);
+            setShowAccountMenu(false);
+            setShowNotifications(false);
           }}
         />
       )}
     </motion.header>
+  );
+}
+
+// Account Menu Item Component
+function AccountMenuItem({ icon: Icon, label, shortcut, connected }) {
+  return (
+    <button className="w-full px-4 py-2 flex items-center justify-between text-sm text-neutral-300 hover:bg-white/5 transition-colors group">
+      <div className="flex items-center gap-3">
+        <Icon className="w-4 h-4 text-neutral-400 group-hover:text-white" />
+        <span>{label}</span>
+      </div>
+      {shortcut && <span className="text-[10px] text-neutral-500 font-mono">{shortcut}</span>}
+      {connected && (
+        <span className="flex items-center gap-1 text-[10px] text-emerald-400">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          Connected
+        </span>
+      )}
+    </button>
+  );
+}
+
+// Notification Item Component
+function NotificationItem({ icon: Icon, title, time, color = "neutral" }) {
+  const colorClasses = {
+    emerald: "text-emerald-400 bg-emerald-500/10",
+    blue: "text-blue-400 bg-blue-500/10",
+    purple: "text-purple-400 bg-purple-500/10",
+    neutral: "text-neutral-400 bg-white/5",
+  };
+
+  return (
+    <div className="px-3 py-2.5 hover:bg-white/5 cursor-pointer transition-colors flex items-start gap-3">
+      <div className={`p-1.5 rounded-lg ${colorClasses[color]}`}>
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-white truncate">{title}</p>
+        <p className="text-[10px] text-neutral-500">{time}</p>
+      </div>
+    </div>
   );
 }

@@ -1,6 +1,8 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import LandingPage from "../pages/LandingPage";
 import EditorPage from "../pages/EditorPageNew";
+import AccountPage from "../pages/AccountPage";
+import SettingsPage from "../pages/SettingsPage";
 
 // Generate a random room ID
 const generateRoomId = () => {
@@ -22,6 +24,8 @@ export default function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
+      <Route path="/account" element={<AccountPage />} />
+      <Route path="/settings" element={<SettingsPage />} />
       <Route path="/editor" element={<EditorRedirect />} />
       <Route path="/editor/:roomId" element={<EditorPage />} />
     </Routes>
