@@ -1,11 +1,33 @@
 import { motion } from "framer-motion";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { VscAccount } from "react-icons/vsc";
 import logo from "../../assets/logo.png";
 
 const navItems = ["Learn", "Build", "Explore"];
 
 const Navbar = () => {
+  const navigate = useNavigate();
+  
+  // Check if user is logged in
+  const isLoggedIn = () => {
+    return localStorage.getItem("syncide_user") !== null;
+  };
+
+  const handleLaunch = () => {
+    if (isLoggedIn()) {
+      navigate("/dashboard");
+    } else {
+      navigate("/auth");
+    }
+  };
+
+  const handleAccountClick = () => {
+    if (isLoggedIn()) {
+      navigate("/account");
+    } else {
+      navigate("/auth");
+    }
+  };
   return (
     <motion.nav
       initial={{ y: -70, opacity: 0 }}
@@ -113,37 +135,35 @@ const Navbar = () => {
             </motion.div>
 
             {/* ACCOUNT */}
-            <Link to="/account">
-              <motion.div
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.95 }}
-                className="relative cursor-pointer p-2 rounded-lg hover:bg-white/5 transition-colors"
-              >
-                <VscAccount className="w-5 h-5 text-gray-400 hover:text-emerald-400 transition-colors" />
-              </motion.div>
-            </Link>
+            <motion.div
+              onClick={handleAccountClick}
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              className="relative cursor-pointer p-2 rounded-lg hover:bg-white/5 transition-colors"
+            >
+              <VscAccount className="w-5 h-5 text-gray-400 hover:text-emerald-400 transition-colors" />
+            </motion.div>
 
             {/* LAUNCH */}
-            <Link to="/editor">
-              <motion.button
-                whileHover={{ scale: 1.06 }}
-                whileTap={{ scale: 0.96 }}
-                transition={{ duration: 0.18, ease: "easeOut" }}
-                className="
-                  relative px-5 py-2 rounded-xl text-sm font-medium text-black
-                  bg-gradient-to-r from-emerald-400 via-cyan-400 to-emerald-400
-                  bg-[length:200%_200%]
-                  animate-gradient-x
-                  shadow-lg shadow-emerald-400/30
-                  overflow-hidden
-                "
-              >
-                <span className="relative z-10">Launch</span>
+            <motion.button
+              onClick={handleLaunch}
+              whileHover={{ scale: 1.06 }}
+              whileTap={{ scale: 0.96 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+              className="
+                relative px-5 py-2 rounded-xl text-sm font-medium text-black
+                bg-gradient-to-r from-emerald-400 via-cyan-400 to-emerald-400
+                bg-[length:200%_200%]
+                animate-gradient-x
+                shadow-lg shadow-emerald-400/30
+                overflow-hidden
+              "
+            >
+              <span className="relative z-10">{isLoggedIn() ? "Dashboard" : "Launch"}</span>
 
-                {/* INNER GLOW */}
-                <span className="absolute inset-0 bg-white/20 blur-xl opacity-20" />
-              </motion.button>
-            </Link>
+              {/* INNER GLOW */}
+              <span className="absolute inset-0 bg-white/20 blur-xl opacity-20" />
+            </motion.button>
 
           </div>
         </div>

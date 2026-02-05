@@ -4,6 +4,19 @@ import { useNavigate } from "react-router-dom";
 export default function HeroSection() {
   const navigate = useNavigate();
 
+  // Check if user is logged in
+  const isLoggedIn = () => {
+    return localStorage.getItem("syncide_user") !== null;
+  };
+
+  const handleGetStarted = () => {
+    if (isLoggedIn()) {
+      navigate("/dashboard");
+    } else {
+      navigate("/auth");
+    }
+  };
+
   return (
     <section className="relative min-h-screen flex flex-col items-center justify-center px-6 lg:px-12 py-24 overflow-hidden">
       
@@ -204,13 +217,13 @@ export default function HeroSection() {
             className="mt-10 flex flex-col sm:flex-row items-center lg:items-start justify-center lg:justify-start gap-4"
           >
             <button
-              onClick={() => navigate("/editor")}
+              onClick={handleGetStarted}
               className="group relative px-8 py-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-black font-semibold text-base transition-all duration-300 shadow-[0_0_30px_rgba(16,185,129,0.4)] hover:shadow-[0_0_50px_rgba(16,185,129,0.6)] hover:scale-[1.02] overflow-hidden"
             >
               {/* Shine effect */}
               <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/25 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
               <span className="relative flex items-center gap-2">
-                Start coding free
+                {isLoggedIn() ? "Go to Dashboard" : "Start coding free"}
                 <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>
