@@ -1,4 +1,4 @@
-import { toolTabs } from '../../constants';
+import { toolTabs } from '../../../shared/constants';
 
 // Tool Hint Panel - Shows when a tool is opened in main workspace
 export default function ToolHintPanel({ activePanel }) {

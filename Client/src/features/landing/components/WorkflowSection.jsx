@@ -112,29 +112,98 @@ export default function WorkflowSection() {
     <section id="workflow" className="relative py-24 px-6 bg-[#030303]">
       {/* Background decorative elements */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        {/* Rotating concentric circles */}
         <motion.svg
-          className="absolute top-10 right-[10%] w-32 h-32 opacity-[0.02]"
+          className="absolute top-10 right-[10%] w-32 h-32 opacity-[0.03]"
           viewBox="0 0 100 100"
           animate={{ rotate: 360 }}
-          transition={{ duration: 80, repeat: Infinity, ease: "linear" }}
+          transition={{ duration: 60, repeat: Infinity, ease: "linear" }}
         >
-          <circle cx="50" cy="50" r="48" stroke="white" strokeWidth="0.5" fill="none" />
-          <circle cx="50" cy="50" r="35" stroke="white" strokeWidth="0.3" fill="none" />
-          <circle cx="50" cy="50" r="22" stroke="white" strokeWidth="0.2" fill="none" />
+          <circle cx="50" cy="50" r="48" stroke="#10b981" strokeWidth="0.5" fill="none" />
+          <circle cx="50" cy="50" r="35" stroke="#10b981" strokeWidth="0.3" strokeDasharray="5 5" fill="none" />
+          <circle cx="50" cy="50" r="22" stroke="#10b981" strokeWidth="0.2" fill="none" />
         </motion.svg>
 
-        {/* Arrow pattern */}
+        {/* Counter-rotating inner ring */}
+        <motion.div
+          className="absolute top-10 right-[10%] w-32 h-32 flex items-center justify-center"
+          animate={{ rotate: -360 }}
+          transition={{ duration: 40, repeat: Infinity, ease: "linear" }}
+        >
+          <div className="w-10 h-10 rounded-full border border-dashed border-emerald-400/10" />
+          <motion.div
+            className="absolute top-1/2 left-0 w-1.5 h-1.5 -translate-y-1/2 rounded-full bg-emerald-400/40"
+          />
+        </motion.div>
+
+        {/* Rotating hexagon - bottom left */}
+        <motion.svg
+          className="absolute bottom-32 left-[5%] w-24 h-24 opacity-[0.03]"
+          viewBox="0 0 100 100"
+          animate={{ rotate: -360 }}
+          transition={{ duration: 45, repeat: Infinity, ease: "linear" }}
+        >
+          <polygon 
+            points="50,10 90,30 90,70 50,90 10,70 10,30" 
+            stroke="#8b5cf6" 
+            strokeWidth="1" 
+            fill="none" 
+          />
+          <polygon 
+            points="50,25 75,37.5 75,62.5 50,75 25,62.5 25,37.5" 
+            stroke="#8b5cf6" 
+            strokeWidth="0.5" 
+            fill="none" 
+          />
+        </motion.svg>
+
+        {/* Rotating ring with orbiting particles - top left */}
+        <motion.div
+          className="absolute top-20 left-[15%] w-20 h-20"
+          animate={{ rotate: 360 }}
+          transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+        >
+          <svg className="w-full h-full opacity-[0.04]" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="40" stroke="#10b981" strokeWidth="1" fill="none" />
+          </svg>
+          <div className="absolute top-0 left-1/2 w-2 h-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-400/50" />
+          <div className="absolute bottom-0 left-1/2 w-1.5 h-1.5 -translate-x-1/2 translate-y-1/2 rounded-full bg-cyan-400/40" />
+        </motion.div>
+
+        {/* Spinning gear - right side */}
+        <motion.svg
+          className="absolute top-1/2 right-[3%] w-16 h-16 opacity-[0.03]"
+          viewBox="0 0 100 100"
+          animate={{ rotate: 360 }}
+          transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
+        >
+          <circle cx="50" cy="50" r="15" fill="none" stroke="#10b981" strokeWidth="2" />
+          <circle cx="50" cy="50" r="30" fill="none" stroke="#10b981" strokeWidth="1" strokeDasharray="10 5" />
+          <circle cx="50" cy="50" r="40" fill="none" stroke="#10b981" strokeWidth="0.5" strokeDasharray="5 10" />
+        </motion.svg>
+
+        {/* Animated arrow pattern */}
         <motion.svg
           className="absolute bottom-20 left-[8%] w-16 h-16 opacity-[0.04]"
           viewBox="0 0 24 24"
           fill="none"
           stroke="#10b981"
           strokeWidth="1"
-          animate={{ x: [0, 10, 0] }}
+          animate={{ x: [0, 10, 0], rotate: [0, 5, 0] }}
           transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
         </motion.svg>
+
+        {/* Rotating square grid */}
+        <motion.div
+          className="absolute bottom-40 right-[20%] w-12 h-12 opacity-[0.03]"
+          animate={{ rotate: 360 }}
+          transition={{ duration: 50, repeat: Infinity, ease: "linear" }}
+        >
+          <div className="w-full h-full border border-white/50 rotate-0" />
+          <div className="absolute inset-2 border border-white/30 rotate-12" />
+        </motion.div>
       </div>
 
       <div className="max-w-6xl mx-auto">

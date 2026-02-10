@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import logo from "../assets/logo.png";
+import logo from "../../../assets/logo.png";
 
 export default function AuthPage() {
   const navigate = useNavigate();

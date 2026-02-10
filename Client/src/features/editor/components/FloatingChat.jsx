@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChatIcon, CloseIcon } from '../ui/Icons';
+import { ChatIcon, CloseIcon } from '../../../shared/components/ui/Icons';
 
 // Floating Chat Component
 export default function FloatingChat({ isOpen, onToggle }) {

@@ -27,7 +27,7 @@ import {
   HiOutlineCloud,
   HiOutlineLightningBolt,
 } from "react-icons/hi";
-import logoImg from "../assets/logo.png";
+import logoImg from "../../../assets/logo.png";
 
 // Mock user data
 const mockUser = {

@@ -2,13 +2,13 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import Editor from "@monaco-editor/react";
-import logo from "../assets/logo.png";
+import logo from "../../../assets/logo.png";
 
 // Constants
-import { languages } from "../constants";
+import { languages } from "../../../shared/constants";
 
 // Utils
-import { getBoilerplate } from "../utils";
+import { getBoilerplate } from "../../../shared/utils";
 
 // Workspaces
 import {
@@ -19,7 +19,7 @@ import {
   NotesWorkspace,
   SnippetsWorkspace,
   APIWorkspace,
-} from "../components/workspaces";
+} from "../components";
 
 // Panels
 import {
@@ -27,10 +27,10 @@ import {
   SearchPanel,
   GitPanel,
   ToolHintPanel,
-} from "../components/panels";
+} from "../components";
 
 // Modals
-import { NewFileModal, NewFolderModal } from "../components/modals";
+import { NewFileModal, NewFolderModal } from "../../../shared/components/modals";
 
 // UI Components
 import {
@@ -54,7 +54,7 @@ import {
   ThemeIcon,
   HelpIcon,
   FeedbackIcon,
-} from "../components/ui";
+} from "../../../shared/components/ui";
 
 // Tool tabs configuration
 const toolTabs = {

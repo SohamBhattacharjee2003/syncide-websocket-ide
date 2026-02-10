@@ -30,7 +30,7 @@ import {
 } from "react-icons/vsc";
 import { HiOutlineVideoCamera, HiOutlineVideoCameraSlash } from "react-icons/hi2";
 import UserAvatar from "./UserAvatar";
-import logoImg from "../../assets/logo.png";
+import logoImg from "../../../assets/logo.png";
 
 export default function TopBar({ 
   roomId, 

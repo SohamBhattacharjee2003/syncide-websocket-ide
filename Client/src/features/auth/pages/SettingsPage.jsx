@@ -19,7 +19,7 @@ import {
   VscEdit,
   VscChevronRight,
 } from "react-icons/vsc";
-import logoImg from "../assets/logo.png";
+import logoImg from "../../../assets/logo.png";
 
 // Settings categories
 const settingsCategories = [

@@ -83,37 +83,72 @@ const features = [
 // Decorative animated background elements
 const BackgroundShapes = () => (
   <div className="absolute inset-0 pointer-events-none overflow-hidden">
-    {/* Floating hexagon */}
+    {/* Rotating hexagon */}
     <motion.svg
-      className="absolute top-20 left-[10%] w-16 h-16 opacity-[0.03]"
+      className="absolute top-20 left-[10%] w-16 h-16 opacity-[0.04]"
       viewBox="0 0 100 100"
-      animate={{ y: [0, -15, 0], rotate: [0, 5, 0] }}
-      transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+      animate={{ rotate: 360 }}
+      transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
     >
       <polygon 
         points="50,5 93,25 93,75 50,95 7,75 7,25" 
-        stroke="white" 
+        stroke="url(#hexFeatureGrad)" 
         strokeWidth="1" 
         fill="none" 
       />
+      <defs>
+        <linearGradient id="hexFeatureGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#10b981" />
+          <stop offset="100%" stopColor="#06b6d4" />
+        </linearGradient>
+      </defs>
     </motion.svg>
 
-    {/* Animated circles */}
+    {/* Rotating ring with orbiting dot */}
+    <motion.div
+      className="absolute top-32 right-[8%] w-32 h-32"
+      animate={{ rotate: 360 }}
+      transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+    >
+      <svg className="w-full h-full opacity-[0.05]" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="45" stroke="#10b981" strokeWidth="1" fill="none" />
+        <circle cx="50" cy="50" r="35" stroke="#10b981" strokeWidth="0.5" strokeDasharray="5 5" fill="none" />
+      </svg>
+      <motion.div
+        className="absolute top-0 left-1/2 w-2 h-2 -translate-x-1/2 rounded-full bg-emerald-400/50"
+      />
+    </motion.div>
+
+    {/* Counter-rotating inner ring */}
+    <motion.div
+      className="absolute bottom-40 left-[12%] w-24 h-24"
+      animate={{ rotate: -360 }}
+      transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
+    >
+      <svg className="w-full h-full opacity-[0.05]" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="40" stroke="#8b5cf6" strokeWidth="1" strokeDasharray="8 4" fill="none" />
+      </svg>
+      <motion.div
+        className="absolute top-1/2 right-0 w-1.5 h-1.5 translate-x-1/2 rounded-full bg-purple-400/60"
+      />
+    </motion.div>
+
+    {/* Animated circles - scaling and rotating */}
     <motion.svg
       className="absolute bottom-32 right-[15%] w-20 h-20 opacity-[0.04]"
       viewBox="0 0 100 100"
-      animate={{ scale: [1, 1.1, 1], opacity: [0.04, 0.06, 0.04] }}
-      transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+      animate={{ rotate: 360, scale: [1, 1.1, 1] }}
+      transition={{ rotate: { duration: 40, repeat: Infinity, ease: "linear" }, scale: { duration: 4, repeat: Infinity } }}
     >
       <circle cx="50" cy="50" r="45" stroke="#10b981" strokeWidth="1" fill="none" />
       <circle cx="50" cy="50" r="30" stroke="#10b981" strokeWidth="0.5" fill="none" />
     </motion.svg>
 
-    {/* Code brackets */}
+    {/* Rotating code brackets */}
     <motion.svg
       className="absolute top-1/2 right-[5%] w-12 h-24 opacity-[0.05]"
       viewBox="0 0 40 80"
-      animate={{ x: [0, 5, 0] }}
+      animate={{ rotate: [0, 10, 0], x: [0, 5, 0] }}
       transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
     >
       <path d="M10 10 L30 40 L10 70" stroke="#10b981" strokeWidth="2" strokeLinecap="round" fill="none" />
@@ -122,23 +157,50 @@ const BackgroundShapes = () => (
     <motion.svg
       className="absolute top-1/3 left-[5%] w-12 h-24 opacity-[0.05]"
       viewBox="0 0 40 80"
-      animate={{ x: [0, -5, 0] }}
+      animate={{ rotate: [0, -10, 0], x: [0, -5, 0] }}
       transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 1 }}
     >
       <path d="M30 10 L10 40 L30 70" stroke="#10b981" strokeWidth="2" strokeLinecap="round" fill="none" />
     </motion.svg>
 
-    {/* Grid dots */}
-    <div className="absolute bottom-20 left-[20%] grid grid-cols-3 gap-3 opacity-[0.06]">
-      {[...Array(9)].map((_, i) => (
-        <motion.div
-          key={i}
-          className="w-1.5 h-1.5 rounded-full bg-emerald-400"
-          animate={{ opacity: [0.3, 1, 0.3] }}
-          transition={{ duration: 2, repeat: Infinity, delay: i * 0.15 }}
-        />
-      ))}
+    {/* Rotating diamond */}
+    <motion.div
+      className="absolute top-[60%] right-[25%] w-10 h-10 opacity-[0.04]"
+      animate={{ rotate: 360 }}
+      transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+    >
+      <div className="w-full h-full rotate-45 border border-emerald-400 rounded-sm" />
+    </motion.div>
+
+    {/* Orbiting particles system */}
+    <div className="absolute bottom-[30%] left-[30%] w-16 h-16">
+      <motion.div
+        className="absolute inset-0"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
+      >
+        <div className="absolute top-0 left-1/2 w-1 h-1 -translate-x-1/2 rounded-full bg-emerald-400/30" />
+        <div className="absolute bottom-0 left-1/2 w-1 h-1 -translate-x-1/2 rounded-full bg-cyan-400/30" />
+      </motion.div>
     </div>
+
+    {/* Grid dots with rotation */}
+    <motion.div 
+      className="absolute bottom-20 left-[20%] opacity-[0.06]"
+      animate={{ rotate: [0, 5, 0] }}
+      transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+    >
+      <div className="grid grid-cols-3 gap-3">
+        {[...Array(9)].map((_, i) => (
+          <motion.div
+            key={i}
+            className="w-1.5 h-1.5 rounded-full bg-emerald-400"
+            animate={{ opacity: [0.3, 1, 0.3], scale: [1, 1.2, 1] }}
+            transition={{ duration: 2, repeat: Infinity, delay: i * 0.15 }}
+          />
+        ))}
+      </div>
+    </motion.div>
   </div>
 );
 

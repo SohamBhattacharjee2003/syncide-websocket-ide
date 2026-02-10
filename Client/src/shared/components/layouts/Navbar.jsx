@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { VscAccount } from "react-icons/vsc";
-import logo from "../../assets/logo.png";
+import logo from "../../../assets/logo.png";
 
 const navItems = ["Learn", "Build", "Explore"];
 

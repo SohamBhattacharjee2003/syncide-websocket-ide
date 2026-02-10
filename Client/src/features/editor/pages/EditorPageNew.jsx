@@ -2,13 +2,13 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Editor from "@monaco-editor/react";
-import logo from "../assets/logo.png";
+import logo from "../../../assets/logo.png";
 
 // Constants
-import { languages, toolTabs, toolColors, participants } from "../constants";
+import { languages, toolTabs, toolColors, participants } from "../../../shared/constants";
 
 // Utils
-import { getBoilerplate, getInitialFile } from "../utils";
+import { getBoilerplate, getInitialFile } from "../../../shared/utils";
 
 // Workspaces
 import {
@@ -19,7 +19,7 @@ import {
   NotesWorkspace,
   SnippetsWorkspace,
   APIWorkspace,
-} from "../components/workspaces";
+} from "../components";
 
 // Panels
 import {
@@ -27,10 +27,10 @@ import {
   SearchPanel,
   GitPanel,
   ToolHintPanel,
-} from "../components/panels";
+} from "../components";
 
 // Modals
-import { NewFileModal, NewFolderModal } from "../components/modals";
+import { NewFileModal, NewFolderModal } from "../../../shared/components/modals";
 
 // UI Components
 import {
@@ -73,10 +73,10 @@ import {
   FeedbackIcon,
   RemoteIcon,
   CopyIcon,
-} from "../components/ui";
+} from "../../../shared/components/ui";
 
 // Chat
-import { FloatingChat } from "../components/chat";
+import { FloatingChat } from "../components";
 
 // ═══════════════════════════════════════════════════════════════
 // SYNCIDE - Professional Collaborative Code Editor
@@ -871,7 +871,7 @@ export default function EditorPage() {
         </div>
 
         {/* ═══════ RIGHT PANEL - GOOGLE MEET STYLE ═══════ */}
-        <div className="w-[420px] bg-[#111114] border-l border-[#1e1e24] flex flex-col">
+        <div className="w-[420px] bg-[#111114] border-l border-[#1e1e24] flex flex-col overflow-hidden">
           {/* Video Layout - Changes based on pinned state */}
           {(() => {
             const visibleParticipants = participants.slice(0, 3);
@@ -1030,12 +1030,12 @@ export default function EditorPage() {
             return (
               <>
                 {/* Equal Stacked Video Tiles */}
-                <div className="p-4 flex-1 flex flex-col gap-3">
-                  <div className="text-xs text-gray-400 uppercase tracking-wider font-medium">
+                <div className="p-4 flex-1 flex flex-col gap-3 overflow-hidden min-h-0">
+                  <div className="text-xs text-gray-400 uppercase tracking-wider font-medium shrink-0">
                     Session · {participants.length} participant{participants.length !== 1 ? 's' : ''}
                   </div>
                   
-                  <div className="flex-1 flex flex-col gap-3">
+                  <div className="flex-1 flex flex-col gap-3 min-h-0">
                     {visibleParticipants.map((p, i) => (
                       <motion.div 
                         key={p.id} 
@@ -1043,10 +1043,9 @@ export default function EditorPage() {
                         animate={{ opacity: 1, y: 0 }} 
                         transition={{ delay: i * 0.08 }}
                         onClick={() => setPinnedUser(p.id)}
-                        className={`relative flex-1 rounded-2xl overflow-hidden cursor-pointer bg-[#1a1a1f] group hover:ring-2 hover:ring-white/20 transition-all ${
+                        className={`relative flex-1 min-h-[100px] rounded-2xl overflow-hidden cursor-pointer bg-[#1a1a1f] group hover:ring-2 hover:ring-white/20 transition-all ${
                           p.isSpeaking ? "ring-2 ring-emerald-500/50" : ""
                         }`}
-                        style={{ minHeight: '120px' }}
                       >
                         <div className="absolute inset-0 opacity-30" style={{ background: `radial-gradient(circle at 50% 40%, ${p.color}60, transparent 70%)` }} />
                         <div className="absolute inset-0 flex items-center justify-center">
@@ -1112,8 +1111,7 @@ export default function EditorPage() {
                         initial={{ opacity: 0, y: 20 }} 
                         animate={{ opacity: 1, y: 0 }} 
                         transition={{ delay: 0.25 }}
-                        className="flex-1"
-                        style={{ minHeight: '120px' }}
+                        className="flex-1 min-h-[100px]"
                       >
                         <ParticipantsOverflowTile 
                           hiddenParticipants={hiddenParticipants}
@@ -1126,7 +1124,8 @@ export default function EditorPage() {
                 </div>
 
                 {/* Controls */}
-                <div className="px-4 pb-4">
+                {/* Controls - Fixed at bottom */}
+                <div className="px-4 py-3 shrink-0 border-t border-[#1e1e24] bg-[#111114]">
                   <div className="flex justify-center gap-2 p-2.5 rounded-2xl bg-[#0a0a0c] border border-[#1e1e24]">
                     <CtrlBtn active={isMicOn} danger={!isMicOn} onClick={() => setIsMicOn(!isMicOn)}>
                       {isMicOn ? <MicIcon /> : <MicOffIcon />}
@@ -1321,13 +1320,12 @@ function ParticipantsOverflowTile({ hiddenParticipants, hiddenCount, onSelectPar
   const [showPopup, setShowPopup] = useState(false);
 
   return (
-    <div className="relative">
+    <div className="relative h-full">
       <motion.div 
         initial={{ opacity: 0, scale: 0.8 }} 
         animate={{ opacity: 1, scale: 1 }} 
         onClick={() => setShowPopup(!showPopup)}
-        className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-[#1f1f24] to-[#16161a] flex items-center justify-center cursor-pointer hover:from-[#252530] hover:to-[#1a1a1f] transition-all border border-white/5 hover:border-white/10 group"
-        style={{ aspectRatio: '1' }}
+        className="relative h-full rounded-2xl overflow-hidden bg-gradient-to-br from-[#1f1f24] to-[#16161a] flex items-center justify-center cursor-pointer hover:from-[#252530] hover:to-[#1a1a1f] transition-all border border-white/5 hover:border-white/10 group"
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
       >

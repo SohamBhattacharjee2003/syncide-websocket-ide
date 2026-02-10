@@ -74,6 +74,94 @@ export default function HeroSection() {
         transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 2 }}
       />
 
+      {/* ROTATING RING - Large outer ring */}
+      <motion.div
+        className="absolute top-[10%] right-[10%] w-[300px] h-[300px] hidden xl:block pointer-events-none"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
+      >
+        <div className="absolute inset-0 rounded-full border border-emerald-500/10" />
+        <div className="absolute inset-4 rounded-full border border-dashed border-emerald-400/20" />
+        <motion.div
+          className="absolute top-1/2 left-0 w-3 h-3 -translate-y-1/2 -translate-x-1/2 rounded-full bg-emerald-400/60 blur-[1px]"
+          animate={{ scale: [1, 1.5, 1] }}
+          transition={{ duration: 2, repeat: Infinity }}
+        />
+      </motion.div>
+
+      {/* ROTATING RING - Small left ring */}
+      <motion.div
+        className="absolute bottom-[20%] left-[5%] w-[180px] h-[180px] hidden xl:block pointer-events-none"
+        animate={{ rotate: -360 }}
+        transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
+      >
+        <div className="absolute inset-0 rounded-full border border-purple-500/15" />
+        <div className="absolute inset-3 rounded-full border border-dotted border-purple-400/25" />
+        <motion.div
+          className="absolute top-0 left-1/2 w-2 h-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-purple-400/70"
+        />
+      </motion.div>
+
+      {/* Rotating Hexagon */}
+      <motion.svg
+        className="absolute top-[35%] left-[3%] w-16 h-16 opacity-20 hidden xl:block"
+        viewBox="0 0 100 100"
+        animate={{ rotate: 360, scale: [1, 1.1, 1] }}
+        transition={{ rotate: { duration: 20, repeat: Infinity, ease: "linear" }, scale: { duration: 4, repeat: Infinity } }}
+      >
+        <polygon 
+          points="50,5 95,27.5 95,72.5 50,95 5,72.5 5,27.5" 
+          fill="none" 
+          stroke="url(#hexGrad)" 
+          strokeWidth="1"
+        />
+        <defs>
+          <linearGradient id="hexGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#10b981" />
+            <stop offset="100%" stopColor="#8b5cf6" />
+          </linearGradient>
+        </defs>
+      </motion.svg>
+
+      {/* Rotating Diamond */}
+      <motion.div
+        className="absolute right-[8%] top-[55%] w-12 h-12 hidden xl:block pointer-events-none"
+        animate={{ rotate: 360 }}
+        transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+      >
+        <div className="w-full h-full rotate-45 border border-cyan-400/20 rounded-sm" />
+      </motion.div>
+
+      {/* Spinning Gear/Cog Shape */}
+      <motion.svg
+        className="absolute bottom-[35%] right-[15%] w-20 h-20 opacity-15 hidden xl:block"
+        viewBox="0 0 100 100"
+        animate={{ rotate: -360 }}
+        transition={{ duration: 40, repeat: Infinity, ease: "linear" }}
+      >
+        <circle cx="50" cy="50" r="20" fill="none" stroke="#10b981" strokeWidth="2" />
+        <circle cx="50" cy="50" r="30" fill="none" stroke="#10b981" strokeWidth="1" strokeDasharray="8 12" />
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#10b981" strokeWidth="0.5" strokeDasharray="4 8" />
+      </motion.svg>
+
+      {/* Orbiting particles */}
+      <div className="absolute top-[40%] left-[20%] w-24 h-24 hidden xl:block pointer-events-none">
+        <motion.div
+          className="absolute inset-0"
+          animate={{ rotate: 360 }}
+          transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+        >
+          <div className="absolute top-0 left-1/2 w-1.5 h-1.5 -translate-x-1/2 rounded-full bg-emerald-400/50" />
+        </motion.div>
+        <motion.div
+          className="absolute inset-2"
+          animate={{ rotate: -360 }}
+          transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
+        >
+          <div className="absolute top-0 left-1/2 w-1 h-1 -translate-x-1/2 rounded-full bg-cyan-400/60" />
+        </motion.div>
+      </div>
+
       {/* Floating Code Brackets - Left */}
       <motion.svg
         className="absolute left-[5%] top-[25%] opacity-25 pointer-events-none hidden lg:block"

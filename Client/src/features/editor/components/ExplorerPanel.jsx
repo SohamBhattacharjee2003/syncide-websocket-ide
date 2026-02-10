@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { languages } from '../../constants';
+import { languages } from '../../../shared/constants';
 
 // Explorer Panel Component
 export default function ExplorerPanel({ 

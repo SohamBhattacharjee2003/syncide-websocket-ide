@@ -64,69 +64,114 @@ const features = [
 // Animated lock decoration
 const SecurityDecoration = () => (
   <div className="absolute inset-0 pointer-events-none overflow-hidden">
-    {/* Animated lock */}
+    {/* Rotating lock ring */}
+    <motion.div
+      className="absolute top-20 right-[10%] w-24 h-24"
+      animate={{ rotate: 360 }}
+      transition={{ duration: 40, repeat: Infinity, ease: "linear" }}
+    >
+      <svg className="w-full h-full opacity-[0.04]" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="45" stroke="#10b981" strokeWidth="1" strokeDasharray="10 5" fill="none" />
+        <circle cx="50" cy="50" r="35" stroke="#10b981" strokeWidth="0.5" fill="none" />
+      </svg>
+      <motion.div
+        className="absolute top-0 left-1/2 w-2 h-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-400/50"
+      />
+    </motion.div>
+
+    {/* Floating lock icon inside */}
     <motion.svg
-      className="absolute top-20 right-[10%] w-20 h-20 opacity-[0.03]"
+      className="absolute top-24 right-[11%] w-12 h-12 opacity-[0.04]"
       viewBox="0 0 24 24"
       fill="none"
       stroke="white"
       strokeWidth="0.5"
-      animate={{ y: [0, -10, 0] }}
-      transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+      animate={{ y: [0, -5, 0], scale: [1, 1.05, 1] }}
+      transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
     >
       <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
     </motion.svg>
 
-    {/* Animated shield */}
+    {/* Rotating shield with orbiting particles */}
+    <motion.div
+      className="absolute bottom-28 left-[8%] w-20 h-20"
+      animate={{ rotate: -360 }}
+      transition={{ duration: 35, repeat: Infinity, ease: "linear" }}
+    >
+      <svg className="w-full h-full opacity-[0.04]" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="40" stroke="#8b5cf6" strokeWidth="1" fill="none" />
+      </svg>
+      <div className="absolute top-1/2 left-0 w-1.5 h-1.5 -translate-y-1/2 rounded-full bg-purple-400/60" />
+      <div className="absolute top-1/2 right-0 w-1.5 h-1.5 -translate-y-1/2 rounded-full bg-purple-400/40" />
+    </motion.div>
+
+    {/* Animated shield inside rotating ring */}
     <motion.svg
-      className="absolute bottom-24 left-[8%] w-16 h-16 opacity-[0.04]"
+      className="absolute bottom-32 left-[10%] w-10 h-10 opacity-[0.05]"
       viewBox="0 0 24 24"
       fill="none"
       stroke="#10b981"
       strokeWidth="0.8"
-      animate={{ scale: [1, 1.1, 1], opacity: [0.04, 0.06, 0.04] }}
-      transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+      animate={{ scale: [1, 1.15, 1] }}
+      transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
     >
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
     </motion.svg>
 
-    {/* Network nodes */}
-    <motion.svg
-      className="absolute top-1/2 left-[5%] w-24 h-24 opacity-[0.03]"
-      viewBox="0 0 100 100"
+    {/* Rotating network nodes */}
+    <motion.div
+      className="absolute top-1/2 left-[5%] w-24 h-24"
+      animate={{ rotate: 360 }}
+      transition={{ duration: 50, repeat: Infinity, ease: "linear" }}
     >
-      <motion.circle cx="20" cy="50" r="4" fill="white"
-        animate={{ opacity: [0.3, 1, 0.3] }}
+      <svg className="w-full h-full opacity-[0.03]" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="40" stroke="white" strokeWidth="0.5" strokeDasharray="3 5" fill="none" />
+        <circle cx="50" cy="10" r="4" fill="#10b981" />
+        <circle cx="90" cy="50" r="4" fill="#10b981" />
+        <circle cx="50" cy="90" r="4" fill="#10b981" />
+        <circle cx="10" cy="50" r="4" fill="#10b981" />
+      </svg>
+    </motion.div>
+
+    {/* Central pulsing node */}
+    <motion.div
+      className="absolute top-1/2 left-[5%] w-24 h-24 flex items-center justify-center"
+    >
+      <motion.div
+        className="w-3 h-3 rounded-full bg-emerald-500/20"
+        animate={{ scale: [1, 1.5, 1], opacity: [0.2, 0.4, 0.2] }}
         transition={{ duration: 2, repeat: Infinity }}
       />
-      <motion.circle cx="50" cy="20" r="4" fill="white"
-        animate={{ opacity: [0.3, 1, 0.3] }}
-        transition={{ duration: 2, repeat: Infinity, delay: 0.3 }}
+    </motion.div>
+
+    {/* Spinning hexagon security badge */}
+    <motion.svg
+      className="absolute top-1/3 right-[5%] w-16 h-16 opacity-[0.03]"
+      viewBox="0 0 100 100"
+      animate={{ rotate: 360 }}
+      transition={{ duration: 45, repeat: Infinity, ease: "linear" }}
+    >
+      <polygon 
+        points="50,5 93,25 93,75 50,95 7,75 7,25" 
+        stroke="#10b981" 
+        strokeWidth="1" 
+        fill="none" 
       />
-      <motion.circle cx="80" cy="50" r="4" fill="white"
-        animate={{ opacity: [0.3, 1, 0.3] }}
-        transition={{ duration: 2, repeat: Infinity, delay: 0.6 }}
+      <polygon 
+        points="50,20 78,35 78,65 50,80 22,65 22,35" 
+        stroke="#10b981" 
+        strokeWidth="0.5" 
+        strokeDasharray="5 3"
+        fill="none" 
       />
-      <motion.circle cx="50" cy="80" r="4" fill="white"
-        animate={{ opacity: [0.3, 1, 0.3] }}
-        transition={{ duration: 2, repeat: Infinity, delay: 0.9 }}
-      />
-      <motion.circle cx="50" cy="50" r="6" fill="#10b981"
-        animate={{ scale: [1, 1.2, 1] }}
-        transition={{ duration: 2, repeat: Infinity }}
-      />
-      <line x1="20" y1="50" x2="44" y2="50" stroke="white" strokeWidth="0.5" />
-      <line x1="56" y1="50" x2="80" y2="50" stroke="white" strokeWidth="0.5" />
-      <line x1="50" y1="20" x2="50" y2="44" stroke="white" strokeWidth="0.5" />
-      <line x1="50" y1="56" x2="50" y2="80" stroke="white" strokeWidth="0.5" />
     </motion.svg>
 
-    {/* Hexagon pattern */}
+    {/* Rotating bottom hexagon */}
     <motion.svg
       className="absolute bottom-20 right-[15%] w-16 h-16 opacity-[0.03]"
       viewBox="0 0 100 100"
-      animate={{ rotate: 360 }}
-      transition={{ duration: 60, repeat: Infinity, ease: "linear" }}
+      animate={{ rotate: -360 }}
+      transition={{ duration: 50, repeat: Infinity, ease: "linear" }}
     >
       <polygon points="50,5 93,25 93,75 50,95 7,75 7,25" stroke="white" strokeWidth="1" fill="none" />
     </motion.svg>
