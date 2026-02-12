@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import logo from "../../../assets/logo.png";
+import { useAuth } from "../../../shared/context/AuthContext";
+import { workspaceAPI, dashboardAPI } from "../../../shared/services/api";
 
 // ==================== MOCK DATA ====================
 
@@ -907,9 +909,13 @@ function WorkspaceCard({ workspace, delay, onOpen, onDelete, onToggleStar, forma
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const { user, logout, isAuthenticated, loading: authLoading } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
-  const [user, setUser] = useState(null);
   const [workspaces, setWorkspaces] = useState([]);
+  const [dashboardStats, setDashboardStats] = useState(null);
+  const [weeklyActivity, setWeeklyActivity] = useState([]);
+  const [languages, setLanguages] = useState([]);
+  const [activities, setActivities] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [workspaceToDelete, setWorkspaceToDelete] = useState(null);
@@ -917,42 +923,99 @@ export default function DashboardPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [currentPlan, setCurrentPlan] = useState("free");
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      const savedUser = localStorage.getItem("syncide_user");
-      if (!savedUser) { navigate("/auth"); return; }
-      setUser(JSON.parse(savedUser));
-      const savedWorkspaces = localStorage.getItem("syncide_workspaces");
-      setWorkspaces(savedWorkspaces ? JSON.parse(savedWorkspaces) : initialWorkspaces);
-      if (!savedWorkspaces) localStorage.setItem("syncide_workspaces", JSON.stringify(initialWorkspaces));
-      setIsLoading(false);
-    }, 2500);
-    return () => clearTimeout(timer);
-  }, [navigate]);
+    const fetchDashboardData = async () => {
+      if (authLoading) return;
+      
+      if (!isAuthenticated) {
+        navigate("/auth");
+        return;
+      }
+      
+      try {
+        // Fetch all dashboard data in parallel
+        const [workspacesRes, statsRes, activityRes, languagesRes, activitiesRes] = await Promise.all([
+          workspaceAPI.getAll(),
+          dashboardAPI.getStats(),
+          dashboardAPI.getWeeklyActivity(),
+          dashboardAPI.getLanguages(),
+          dashboardAPI.getActivities()
+        ]);
+        
+        setWorkspaces(workspacesRes.workspaces || []);
+        setDashboardStats(statsRes.stats || null);
+        setWeeklyActivity(activityRes.activityData || activityData);
+        setLanguages(languagesRes.languageData || languageData);
+        setActivities(activitiesRes.activities || recentActivity);
+      } catch (err) {
+        console.error("Failed to fetch dashboard data:", err);
+        setError("Failed to load dashboard data. Using demo data.");
+        // Fallback to initial mock data
+        setWorkspaces(initialWorkspaces);
+        setWeeklyActivity(activityData);
+        setLanguages(languageData);
+        setActivities(recentActivity);
+      } finally {
+        // Add a small delay for smooth loading animation
+        setTimeout(() => setIsLoading(false), 500);
+      }
+    };
+    
+    fetchDashboardData();
+  }, [isAuthenticated, authLoading, navigate]);
 
-  const handleLogout = () => { localStorage.removeItem("syncide_user"); navigate("/"); };
-  const handleOpenWorkspace = (workspace) => {
-    const updated = workspaces.map(ws => ws.id === workspace.id ? { ...ws, lastOpened: new Date().toISOString() } : ws);
-    setWorkspaces(updated);
-    localStorage.setItem("syncide_workspaces", JSON.stringify(updated));
-    navigate(workspace.type === "realtime" ? `/editor/${workspace.id}` : `/editor-plain/${workspace.id}`);
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate("/");
+    } catch (err) {
+      console.error("Logout failed:", err);
+    }
   };
-  const handleDeleteClick = (workspace) => { setWorkspaceToDelete(workspace); setShowDeleteModal(true); };
-  const handleConfirmDelete = () => {
-    if (workspaceToDelete) {
-      const updated = workspaces.filter(ws => ws.id !== workspaceToDelete.id);
+  
+  const handleOpenWorkspace = async (workspace) => {
+    try {
+      await workspaceAPI.update(workspace._id || workspace.id, { lastOpened: new Date().toISOString() });
+      const updated = workspaces.map(ws => (ws._id || ws.id) === (workspace._id || workspace.id) ? { ...ws, lastOpened: new Date().toISOString() } : ws);
       setWorkspaces(updated);
-      localStorage.setItem("syncide_workspaces", JSON.stringify(updated));
+    } catch (err) {
+      console.error("Failed to update workspace:", err);
+    }
+    const wsId = workspace._id || workspace.id;
+    const wsType = workspace.workspaceType || workspace.type || "realtime";
+    navigate(wsType === "realtime" ? `/editor/${wsId}` : `/editor-plain/${wsId}`);
+  };
+  
+  const handleDeleteClick = (workspace) => { setWorkspaceToDelete(workspace); setShowDeleteModal(true); };
+  
+  const handleConfirmDelete = async () => {
+    if (workspaceToDelete) {
+      try {
+        const wsId = workspaceToDelete._id || workspaceToDelete.id;
+        await workspaceAPI.delete(wsId);
+        const updated = workspaces.filter(ws => (ws._id || ws.id) !== wsId);
+        setWorkspaces(updated);
+      } catch (err) {
+        console.error("Failed to delete workspace:", err);
+        setError("Failed to delete workspace");
+      }
     }
     setShowDeleteModal(false);
     setWorkspaceToDelete(null);
   };
-  const toggleStar = (workspaceId) => {
-    const updated = workspaces.map(ws => ws.id === workspaceId ? { ...ws, starred: !ws.starred } : ws);
-    setWorkspaces(updated);
-    localStorage.setItem("syncide_workspaces", JSON.stringify(updated));
+  
+  const toggleStar = async (workspaceId) => {
+    try {
+      await workspaceAPI.toggleStar(workspaceId);
+      const updated = workspaces.map(ws => (ws._id || ws.id) === workspaceId ? { ...ws, starred: !ws.starred } : ws);
+      setWorkspaces(updated);
+    } catch (err) {
+      console.error("Failed to toggle star:", err);
+    }
   };
+  
   const formatDate = (dateStr) => {
     const diff = Date.now() - new Date(dateStr);
     if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
@@ -1429,7 +1492,18 @@ export default function DashboardPage() {
 
       {/* Modals */}
       <AnimatePresence>
-        {showCreateModal && <CreateWorkspaceModal onClose={() => setShowCreateModal(false)} onCreateWorkspace={(ws) => { setWorkspaces([ws, ...workspaces]); localStorage.setItem("syncide_workspaces", JSON.stringify([ws, ...workspaces])); setShowCreateModal(false); handleOpenWorkspace(ws); }} />}
+        {showCreateModal && <CreateWorkspaceModal onClose={() => setShowCreateModal(false)} onCreateWorkspace={async (wsData) => { 
+          try {
+            const res = await workspaceAPI.create(wsData);
+            const newWs = res.workspace;
+            setWorkspaces([newWs, ...workspaces]); 
+            setShowCreateModal(false); 
+            handleOpenWorkspace(newWs); 
+          } catch (err) {
+            console.error("Failed to create workspace:", err);
+            setError("Failed to create workspace");
+          }
+        }} />}
       </AnimatePresence>
       <AnimatePresence>
         {showDeleteModal && workspaceToDelete && (

@@ -1,10 +1,13 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "../../../shared/context/AuthContext";
 import logo from "../../../assets/logo.png";
 
 export default function AuthPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { login, register } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   
@@ -12,6 +15,9 @@ export default function AuthPage() {
   const [loginData, setLoginData] = useState({ email: "", password: "" });
   const [signupData, setSignupData] = useState({ name: "", email: "", password: "", confirmPassword: "" });
   const [errors, setErrors] = useState({});
+
+  // Get redirect path from location state
+  const from = location.state?.from?.pathname || "/dashboard";
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -29,19 +35,14 @@ export default function AuthPage() {
 
     setIsLoading(true);
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Mock successful login - save to localStorage
-    localStorage.setItem("syncide_user", JSON.stringify({
-      id: "user_" + Date.now(),
-      name: loginData.email.split("@")[0],
-      email: loginData.email,
-      avatar: null
-    }));
-    
-    setIsLoading(false);
-    navigate("/dashboard");
+    try {
+      await login(loginData.email, loginData.password);
+      navigate(from, { replace: true });
+    } catch (error) {
+      setErrors({ general: error.message || "Login failed. Please try again." });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSignup = async (e) => {
@@ -63,19 +64,14 @@ export default function AuthPage() {
 
     setIsLoading(true);
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Mock successful signup - save to localStorage
-    localStorage.setItem("syncide_user", JSON.stringify({
-      id: "user_" + Date.now(),
-      name: signupData.name,
-      email: signupData.email,
-      avatar: null
-    }));
-    
-    setIsLoading(false);
-    navigate("/dashboard");
+    try {
+      await register(signupData.name, signupData.email, signupData.password);
+      navigate(from, { replace: true });
+    } catch (error) {
+      setErrors({ general: error.message || "Registration failed. Please try again." });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -200,6 +196,17 @@ export default function AuthPage() {
                     ? "Enter your credentials to access your workspaces" 
                     : "Start collaborating with your team today"}
                 </p>
+
+                {/* General Error Message */}
+                {errors.general && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl mb-4"
+                  >
+                    <p className="text-red-400 text-sm text-center">{errors.general}</p>
+                  </motion.div>
+                )}
 
                 {/* Form */}
                 <form onSubmit={isLogin ? handleLogin : handleSignup} className="space-y-4">

@@ -247,8 +247,13 @@ export default function EditorPage() {
     setShowTerminal(true);
     setIsExecuting(true);
     
-    const code = editorRef.current?.getValue() || "";
+    const code = editorRef.current?.getValue() || activeFile.content || "";
     const language = activeFile.language;
+    
+    console.log("Running code:");
+    console.log("Language:", language);
+    console.log("Code length:", code.length);
+    console.log("Code:", code);
     
     setTerminalOutput(prev => 
       `${prev}Running ${activeFile.name}...\n\n`

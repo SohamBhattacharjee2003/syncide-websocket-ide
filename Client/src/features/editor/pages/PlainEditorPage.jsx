@@ -382,31 +382,41 @@ export default function PlainEditorPage() {
     setShowTerminal(true);
     setIsExecuting(true);
     
-    const code = editorRef.current?.getValue() || "";
-    const lang = activeFile.language;
+    const code = editorRef.current?.getValue() || activeFile.content || "";
+    const language = activeFile.language;
     
     setTerminalOutput(prev => prev + `\n$ Running ${activeFile.name}...\n`);
     
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    // Simulated output based on language
-    let output = "";
-    if (lang === "javascript" || lang === "typescript") {
-      try {
-        const logs = [];
-        const mockConsole = { log: (...args) => logs.push(args.join(" ")) };
-        const wrappedCode = `(function(console) { ${code} })(mockConsole)`;
-        eval(wrappedCode.replace("mockConsole", JSON.stringify(mockConsole)));
-        output = logs.length > 0 ? logs.join("\n") : "Code executed successfully (no output)";
-      } catch (e) {
-        output = `Error: ${e.message}`;
+    try {
+      const response = await fetch("http://localhost:5000/execute", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ code, language }),
+      });
+      
+      const result = await response.json();
+      
+      if (result.error && !result.output) {
+        setTerminalOutput(prev => prev + `❌ Error:\n${result.error}\n\n$ `);
+      } else {
+        const output = result.output || "(No output)";
+        const errorOutput = result.error ? `\n⚠️ Stderr:\n${result.error}` : "";
+        const status = result.success ? "✅" : "❌";
+        const duration = (result.duration / 1000).toFixed(2);
+        
+        setTerminalOutput(prev => 
+          prev + `${output}${errorOutput}\n\n${status} Completed in ${duration}s (exit code: ${result.exitCode})\n\n$ `
+        );
       }
-    } else {
-      output = `[Simulated] Code execution for ${languages[lang]?.name || lang} completed successfully.\nNote: This is a browser-based editor. Use a local runtime for actual execution.`;
+    } catch (err) {
+      setTerminalOutput(prev => 
+        prev + `❌ Failed to execute: ${err.message}\n\nMake sure the backend server is running on http://localhost:5000\n\n$ `
+      );
+    } finally {
+      setIsExecuting(false);
     }
-    
-    setTerminalOutput(prev => prev + output + "\n$ ");
-    setIsExecuting(false);
   };
 
   // Clear terminal
