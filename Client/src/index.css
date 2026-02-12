@@ -18,6 +18,23 @@ body {
   overflow-x: hidden;
 }
 
+/* Prevent text cursor on non-input elements */
+a, button, [role="button"], .cursor-pointer {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Remove caret/text cursor from non-editable elements */
+*:not(input):not(textarea):not([contenteditable="true"]) {
+  caret-color: transparent;
+}
+
+/* Restore caret for input elements */
+input, textarea, [contenteditable="true"] {
+  caret-color: #10b981;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
