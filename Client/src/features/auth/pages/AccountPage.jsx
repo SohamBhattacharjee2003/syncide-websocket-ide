@@ -28,6 +28,7 @@ import {
   HiOutlineLightningBolt,
 } from "react-icons/hi";
 import logoImg from "../../../assets/logo.png";
+import { useAuth } from '../../../shared/context/AuthContext';
 
 // Mock user data
 const mockUser = {
@@ -120,6 +121,9 @@ function ProgressBar({ value, max, color = "emerald" }) {
 
 // Profile Section
 function ProfileSection({ user, onEdit }) {
+  if (!user || !user.name) {
+    return null;
+  }
   const [isEditing, setIsEditing] = useState(false);
   const [editedName, setEditedName] = useState(user.name);
 
@@ -182,7 +186,7 @@ function ProfileSection({ user, onEdit }) {
               </div>
             ) : (
               <>
-                <h3 className="text-2xl font-bold text-white">{user.name}</h3>
+                <h3 className="text-2xl font-bold text-white">{user && user.name ? user.name : ""}</h3>
                 <motion.button
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
@@ -194,12 +198,12 @@ function ProfileSection({ user, onEdit }) {
               </>
             )}
           </div>
-          <p className="text-neutral-400 mt-1">{user.email}</p>
+          <p className="text-neutral-400 mt-1">{user && user.email ? user.email : ""}</p>
           <div className="flex items-center gap-3 mt-3">
             <span className="px-3 py-1 text-xs font-medium bg-emerald-500/20 text-emerald-400 rounded-full border border-emerald-500/30">
-              {user.plan} Plan
+              {user && user.plan ? user.plan : "Free"} Plan
             </span>
-            <span className="text-xs text-neutral-500">Member since {user.joinedDate}</span>
+            <span className="text-xs text-neutral-500">Member since {user && user.joinedDate ? user.joinedDate : "N/A"}</span>
           </div>
         </div>
       </div>
@@ -590,13 +594,31 @@ function SecuritySection() {
 
 // Main Account Page Component
 export default function AccountPage() {
-  const [activeSection, setActiveSection] = useState("profile");
   const navigate = useNavigate();
+  const { user, loading } = useAuth();
+  const [activeSection, setActiveSection] = useState('profile');
 
-  const renderSection = () => {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-[#020617] text-white">
+        Loading account...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-[#020617] text-white">
+        You are not logged in.
+      </div>
+    );
+  }
+
+  // Replace all mockUser references with user
+  function renderSection() {
     switch (activeSection) {
       case "profile":
-        return <ProfileSection user={mockUser} />;
+        return <ProfileSection user={user} />;
       case "usage":
         return <UsageSection />;
       case "sessions":
@@ -606,9 +628,9 @@ export default function AccountPage() {
       case "security":
         return <SecuritySection />;
       default:
-        return <ProfileSection user={mockUser} />;
+        return <ProfileSection user={user} />;
     }
-  };
+  }
 
   return (
     <div className="min-h-screen bg-[#020617] text-neutral-200">

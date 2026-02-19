@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { VscTerminal, VscAdd, VscArrowRight } from "react-icons/vsc";
 
-export default function JoinRoomModal({ isOpen, onClose }) {
+export default function JoinRoomModal({ open, isOpen, onClose }) {
   const [roomId, setRoomId] = useState("");
   const [userName, setUserName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -25,17 +25,15 @@ export default function JoinRoomModal({ isOpen, onClose }) {
   };
 
   const handleJoinRoom = () => {
-    if (roomId.trim()) {
-      // Store username in localStorage or context
-      if (userName.trim()) {
-        localStorage.setItem("syncide-username", userName);
-      }
-      navigate(`/editor/${roomId}`);
+    const cleanRoomId = roomId.trim().toUpperCase();
+    if (cleanRoomId && userName.trim()) {
+      localStorage.setItem("syncide-username", userName);
+      navigate(`/editor/${cleanRoomId}`);
       onClose?.();
     }
   };
 
-  if (!isOpen) return null;
+  if (!(typeof open === 'undefined' ? isOpen : open)) return null;
 
   return (
     <motion.div
@@ -60,7 +58,7 @@ export default function JoinRoomModal({ isOpen, onClose }) {
         <div className="p-6 border-b border-white/5">
           <div className="flex items-center gap-3">
             <motion.div
-              className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center"
+              className="w-10 h-10 rounded-xl bg-linear-to-br from-emerald-500 to-cyan-500 flex items-center justify-center"
               animate={{
                 boxShadow: [
                   "0 0 10px rgba(16,185,129,0.3)",
@@ -110,9 +108,14 @@ export default function JoinRoomModal({ isOpen, onClose }) {
               <input
                 type="text"
                 value={roomId}
-                onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+                onChange={(e) => setRoomId(e.target.value)}
+                onPaste={(e) => {
+                  setTimeout(() => {
+                    setRoomId(e.target.value.toUpperCase());
+                  }, 10);
+                }}
                 placeholder="Enter room code"
-                maxLength={6}
+                maxLength={24}
                 className="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white font-mono text-center text-lg tracking-widest placeholder-neutral-500 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all uppercase"
               />
               <motion.button
@@ -162,16 +165,16 @@ export default function JoinRoomModal({ isOpen, onClose }) {
           </motion.button>
           <motion.button
             onClick={handleJoinRoom}
-            disabled={!roomId.trim()}
+            disabled={!roomId.trim() || !userName.trim()}
             className={`
               flex-1 px-4 py-3 rounded-lg flex items-center justify-center gap-2 font-medium transition-all
-              ${roomId.trim()
-                ? "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white hover:opacity-90"
+              ${roomId.trim() && userName.trim()
+                ? "bg-linear-to-r from-emerald-500 to-cyan-500 text-white hover:opacity-90"
                 : "bg-white/5 text-neutral-600 cursor-not-allowed"
               }
             `}
-            whileHover={roomId.trim() ? { scale: 1.01 } : {}}
-            whileTap={roomId.trim() ? { scale: 0.99 } : {}}
+            whileHover={roomId.trim() && userName.trim() ? { scale: 1.01 } : {}}
+            whileTap={roomId.trim() && userName.trim() ? { scale: 0.99 } : {}}
           >
             Join Room
             <VscArrowRight className="w-4 h-4" />

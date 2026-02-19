@@ -1,5 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState, useCallback } from "react";
+import JoinRoomModal from "../components/JoinRoomModal";
 import { motion, AnimatePresence } from "framer-motion";
 import socket from "../socket/socket";
 
@@ -18,16 +19,10 @@ import PreJoinScreen from "../components/editor/PreJoinScreen";
 import useWebRTC from "../hooks/useWebRTC";
 
 // Sample users for demo - in production, these come from socket
-const mockUsers = [
-  { id: 1, name: "Alex Johnson", isHost: true, isTyping: false },
-  { id: 2, name: "Sarah Chen", isTyping: true },
-  { id: 3, name: "Mike Peters", isTyping: false },
-];
+// Remove mockUsers. In production, users come from socket events.
 
-const mockMessages = [
-  { user: "Alex Johnson", text: "Hey team, let's work on the auth module", time: "10:30 AM" },
-  { user: "Sarah Chen", text: "Sounds good! I'll handle the frontend", time: "10:32 AM" },
-];
+// Remove mockMessages. In production, messages come from socket or backend.
+const mockMessages = [];
 
 // Language-specific boilerplate code
 const boilerplates = {
@@ -50,63 +45,44 @@ users.forEach(user => {
 // TypeScript - Start coding with type safety
 
 interface User {
-  id: number;
-  name: string;
-  email: string;
-}
+  const boilerplates = {
+    javascript: `// Welcome to SyncIDE! 🚀
+  // Start coding collaboratively...
 
-function greet(user: User): string {
-  return \`Hello, \${user.name}! Welcome to the collaborative IDE.\`;
-}
+  function greet(name) {
+    return `Hello, ${name}! Welcome to the collaborative IDE.`;
+  }
 
-const users: User[] = [
-  { id: 1, name: "Alex", email: "alex@example.com" },
-  { id: 2, name: "Sarah", email: "sarah@example.com" },
-  { id: 3, name: "Mike", email: "mike@example.com" },
-];
+  // Try editing this code and see it sync in real-time!
+  `,
+    typescript: `// Welcome to SyncIDE! 🚀
+  // TypeScript - Start coding with type safety
 
-users.forEach(user => {
-  console.log(greet(user));
-});
+  interface User {
+    id: number;
+    name: string;
+    email: string;
+  }
+
+  function greet(user: User): string {
+    return `Hello, ${user.name}! Welcome to the collaborative IDE.`;
+  }
+
+  // Try editing this code and see it sync in real-time!
+  `,
+    python: `# Welcome to SyncIDE! 🚀
+  # Python - Start coding collaboratively
+
 `,
-  python: `# Welcome to SyncIDE! 🚀
-# Python - Start coding collaboratively
+      """Return a greeting message."""
+      return f"Hello, {name}! Welcome to the collaborative IDE."
 
-def greet(name: str) -> str:
-    """Return a greeting message."""
-    return f"Hello, {name}! Welcome to the collaborative IDE."
-
-def main():
-    users = ["Alex", "Sarah", "Mike"]
-    
-    for user in users:
-        print(greet(user))
-
-if __name__ == "__main__":
-    main()
-
-# Try editing this code and see it sync in real-time!
-`,
-  java: `// Welcome to SyncIDE! 🚀
-// Java - Start coding collaboratively
-
-public class Main {
-    public static void main(String[] args) {
-        String[] users = {"Alex", "Sarah", "Mike"};
-        
-        for (String user : users) {
-            System.out.println(greet(user));
-        }
-    }
-    
-    public static String greet(String name) {
-        return "Hello, " + name + "! Welcome to the collaborative IDE.";
-    }
-}
-
-// Try editing this code and see it sync in real-time!
-`,
   cpp: `// Welcome to SyncIDE! 🚀
+      pass
+
+  # Try editing this code and see it sync in real-time!
+  `,
+  };
 // C++ - Start coding collaboratively
 
 #include <iostream>
@@ -246,7 +222,7 @@ export default function EditorPage() {
   const [code, setCode] = useState(boilerplates.javascript);
   const [language, setLanguage] = useState("javascript");
   const [fileName, setFileName] = useState("main.js");
-  const [users, setUsers] = useState(mockUsers);
+  const [users, setUsers] = useState([]);
   const [messages, setMessages] = useState(mockMessages);
   const [cursorPosition, setCursorPosition] = useState({ line: 1, column: 1 });
   const [isConnected, setIsConnected] = useState(true);
@@ -260,7 +236,11 @@ export default function EditorPage() {
   const [showVideoCall, setShowVideoCall] = useState(false);
   const [isVideoPanelOpen, setIsVideoPanelOpen] = useState(true);
   const [isInCall, setIsInCall] = useState(false);
-  const [userName] = useState("Alex Johnson"); // In production, get from auth
+  // Get username from localStorage (set by JoinRoomModal)
+  const [userName, setUserName] = useState(() => localStorage.getItem("syncide-username") || "");
+  const [showJoinModal, setShowJoinModal] = useState(!userName);
+    const [showInvite, setShowInvite] = useState(false);
+    const inviteLink = `${window.location.origin}/editor/${roomId}`;
   
   const saveTimeout = useRef(null);
 
@@ -283,7 +263,8 @@ export default function EditorPage() {
 
   // Socket connection
   useEffect(() => {
-    socket.emit("join-room", roomId);
+    if (!userName) return;
+    socket.emit("join-room", roomId, userName);
 
     socket.on("code-update", (newCode) => {
       setCode(newCode);
@@ -291,15 +272,29 @@ export default function EditorPage() {
       setTimeout(() => setIsSyncing(false), 500);
     });
 
+    socket.on("room-users", (userList) => {
+      setUsers(userList);
+    });
+
     socket.on("connect", () => setIsConnected(true));
     socket.on("disconnect", () => setIsConnected(false));
 
     return () => {
       socket.off("code-update");
+      socket.off("room-users");
       socket.off("connect");
       socket.off("disconnect");
     };
-  }, [roomId]);
+  }, [roomId, userName]);
+
+  // Show join modal if username is missing
+  const handleJoinModalClose = (name) => {
+    if (name && name.trim()) {
+      localStorage.setItem("syncide-username", name);
+      setUserName(name);
+      setShowJoinModal(false);
+    }
+  };
 
   // Code change handler
   const handleCodeChange = useCallback((value) => {
@@ -308,24 +303,12 @@ export default function EditorPage() {
     setCode(value);
     setIsSyncing(true);
 
-    // Real-time sync
+    // Real-time sync and save
     socket.emit("code-change", {
       roomId,
       code: value,
     });
-
-    // Debounced save
-    if (saveTimeout.current) {
-      clearTimeout(saveTimeout.current);
-    }
-
-    saveTimeout.current = setTimeout(() => {
-      socket.emit("save-code", {
-        roomId,
-        code: value,
-      });
-      setIsSyncing(false);
-    }, 1000);
+    setIsSyncing(false);
   }, [roomId]);
 
   // Language change handler
@@ -353,7 +336,7 @@ export default function EditorPage() {
   // Save handler
   const handleSave = useCallback(() => {
     setIsSyncing(true);
-    socket.emit("save-code", { roomId, code });
+    socket.emit("code-change", { roomId, code });
     setTimeout(() => setIsSyncing(false), 500);
   }, [roomId, code]);
 
@@ -425,6 +408,10 @@ export default function EditorPage() {
     }
   }, [roomId, userName, startCamera]);
 
+  if (showJoinModal) {
+    return <JoinRoomModal open={true} onClose={handleJoinModalClose} />;
+  }
+
   return (
     <div className="h-screen flex flex-col bg-[#030303] overflow-hidden">
       {/* Background Effects */}
@@ -441,13 +428,13 @@ export default function EditorPage() {
         
         {/* Ambient glow */}
         <div 
-          className="absolute top-0 left-1/4 w-[600px] h-[400px] opacity-20"
+          className="absolute top-0 left-1/4 w-150 h-100 opacity-20"
           style={{
             background: "radial-gradient(ellipse at center, rgba(16,185,129,0.15) 0%, transparent 50%)",
           }}
         />
         <div 
-          className="absolute bottom-0 right-1/4 w-[500px] h-[300px] opacity-15"
+          className="absolute bottom-0 right-1/4 w-125 h-75 opacity-15"
           style={{
             background: "radial-gradient(ellipse at center, rgba(139,92,246,0.15) 0%, transparent 50%)",
           }}

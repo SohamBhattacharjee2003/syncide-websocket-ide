@@ -13,7 +13,7 @@ export default function AuthPage() {
   
   // Form states
   const [loginData, setLoginData] = useState({ email: "", password: "" });
-  const [signupData, setSignupData] = useState({ name: "", email: "", password: "", confirmPassword: "" });
+  const [signupData, setSignupData] = useState({ username: "", email: "", password: "", confirmPassword: "" });
   const [errors, setErrors] = useState({});
 
   // Get redirect path from location state
@@ -51,7 +51,7 @@ export default function AuthPage() {
     
     // Validation
     const newErrors = {};
-    if (!signupData.name) newErrors.name = "Name is required";
+    if (!signupData.username) newErrors.username = "Username is required";
     if (!signupData.email) newErrors.email = "Email is required";
     if (!signupData.password) newErrors.password = "Password is required";
     if (signupData.password.length < 6) newErrors.password = "Password must be at least 6 characters";
@@ -65,7 +65,7 @@ export default function AuthPage() {
     setIsLoading(true);
     
     try {
-      await register(signupData.name, signupData.email, signupData.password);
+      await register(signupData.username, signupData.email, signupData.password);
       navigate(from, { replace: true });
     } catch (error) {
       setErrors({ general: error.message || "Registration failed. Please try again." });
@@ -210,20 +210,20 @@ export default function AuthPage() {
 
                 {/* Form */}
                 <form onSubmit={isLogin ? handleLogin : handleSignup} className="space-y-4">
-                  {/* Name Field (Signup only) */}
+                  {/* Username Field (Signup only) */}
                   {!isLogin && (
                     <div>
-                      <label className="block text-sm font-medium text-white/70 mb-2">Full Name</label>
+                      <label className="block text-sm font-medium text-white/70 mb-2">Username</label>
                       <input
                         type="text"
-                        value={signupData.name}
-                        onChange={(e) => setSignupData({ ...signupData, name: e.target.value })}
+                        value={signupData.username}
+                        onChange={(e) => setSignupData({ ...signupData, username: e.target.value })}
                         className={`w-full px-4 py-3 bg-[#0a0a0c] border rounded-xl text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all ${
-                          errors.name ? "border-red-500" : "border-[#1e1e24]"
+                          errors.username ? "border-red-500" : "border-[#1e1e24]"
                         }`}
-                        placeholder="John Doe"
+                        placeholder="your_username"
                       />
-                      {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
+                      {errors.username && <p className="text-red-400 text-xs mt-1">{errors.username}</p>}
                     </div>
                   )}
 

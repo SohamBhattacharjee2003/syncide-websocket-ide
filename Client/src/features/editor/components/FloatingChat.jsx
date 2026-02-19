@@ -57,49 +57,9 @@ export default function FloatingChat({ isOpen, onToggle }) {
                 <div className="flex-1 h-px bg-[#2a2a32]" />
               </div>
 
-              {/* Message from Emma */}
-              <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                  EW
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-medium text-white">Emma Wilson</span>
-                    <span className="text-[10px] text-gray-600">10:32 AM</span>
-                  </div>
-                  <div className="bg-[#1e1e24] px-4 py-2.5 rounded-2xl rounded-tl-md text-sm text-gray-300">
-                    Let's fix the auth bug first 🔧
-                  </div>
-                </div>
-              </div>
-
-              {/* My Message */}
-              <div className="flex gap-3 justify-end">
-                <div className="max-w-[80%]">
-                  <div className="flex items-center gap-2 mb-1 justify-end">
-                    <span className="text-[10px] text-gray-600">10:33 AM</span>
-                    <span className="text-sm font-medium text-emerald-400">You</span>
-                  </div>
-                  <div className="bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 rounded-2xl rounded-tr-md text-sm text-white">
-                    On it! Checking now
-                  </div>
-                </div>
-              </div>
-
-              {/* Message from James */}
-              <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-amber-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                  JC
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-medium text-white">James Chen</span>
-                    <span className="text-[10px] text-gray-600">10:35 AM</span>
-                  </div>
-                  <div className="bg-[#1e1e24] px-4 py-2.5 rounded-2xl rounded-tl-md text-sm text-gray-300">
-                    I'll help with frontend validation 👍
-                  </div>
-                </div>
+              {/* No messages yet. In production, messages will appear here. */}
+              <div className="flex flex-col items-center justify-center h-full text-neutral-400">
+                <span>No messages yet.</span>
               </div>
 
               {/* Typing Indicator */}

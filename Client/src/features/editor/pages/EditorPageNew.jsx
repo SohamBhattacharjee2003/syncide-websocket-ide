@@ -5,7 +5,7 @@ import Editor from "@monaco-editor/react";
 import logo from "../../../assets/logo.png";
 
 // Constants
-import { languages, toolTabs, toolColors, participants } from "../../../shared/constants";
+import { languages, toolTabs, toolColors } from "../../../shared/constants";
 
 // Utils
 import { getBoilerplate, getInitialFile } from "../../../shared/utils";
@@ -82,6 +82,10 @@ import { FloatingChat } from "../components";
 // SYNCIDE - Professional Collaborative Code Editor
 // ═══════════════════════════════════════════════════════════════
 
+
+import socket from "../../../shared/socket/socket";
+import { useEffect } from "react";
+
 export default function EditorPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
@@ -117,6 +121,35 @@ export default function EditorPage() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [hasNotifications, setHasNotifications] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  // Real-time participants state
+  const [participants, setParticipants] = useState([]);
+  // Get username from localStorage (set by JoinRoomModal)
+  const userName = localStorage.getItem("syncide-username") || "";
+
+  // Join room and listen for participants
+  useEffect(() => {
+    // Send username to backend for participant tracking
+    // Always use uppercase roomId for consistency
+    const normalizedRoomId = roomId ? roomId.toUpperCase() : roomId;
+    socket.emit("join-room", normalizedRoomId, userName);
+    socket.on("room-users", (userList) => {
+      // Debug: Log the participant list received from backend
+      console.log("[room-users] received:", userList);
+      // Mark the current user in the participant list
+      const markedList = userList.map(u => ({
+        ...u,
+        isYou: u.name === userName
+      }));
+      // Sort so host is always first, only one host
+      const host = markedList.find(u => u.isHost);
+      const others = markedList.filter(u => !u.isHost);
+      const sorted = host ? [host, ...others] : [...others];
+      setParticipants(sorted);
+    });
+    return () => {
+      socket.off("room-users");
+    };
+  }, [roomId, userName]);
 
   // Find file by ID
   const findFile = (id) => files.find(f => f.id === id);
@@ -426,35 +459,66 @@ export default function EditorPage() {
             {/* Collaborators */}
             <div className="flex items-center gap-3">
               <div className="flex -space-x-2">
-                {participants.slice(0, 4).map((p, i) => (
-                  <motion.div
-                    key={p.id}
-                    className="relative"
-                    whileHover={{ scale: 1.15, zIndex: 20 }}
-                    style={{ zIndex: 10 - i }}
-                  >
+                {participants.length === 0 ? (
+                  <div className="relative">
                     <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold text-white ring-3 ring-[#0f0f12] cursor-pointer shadow-lg"
-                      style={{ background: `linear-gradient(135deg, ${p.color}, ${p.color}88)` }}
-                      onClick={() => setPinnedUser(p.id)}
-                      title={p.name}
+                      className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold text-white ring-3 ring-[#0f0f12] shadow-lg relative bg-gradient-to-br from-amber-400 to-yellow-300"
+                      title="Host"
                     >
-                      {p.initials}
+                      H
+                      <span className="absolute -top-2 -right-2 px-1.5 py-0.5 bg-amber-500/80 text-white text-[9px] rounded font-bold shadow-lg border border-amber-400">HOST</span>
                     </div>
-                    {p.isSpeaking && (
-                      <motion.div 
-                        className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-400 rounded-full ring-2 ring-[#0f0f12]"
-                        animate={{ scale: [1, 1.2, 1] }}
-                        transition={{ duration: 0.5, repeat: Infinity }}
-                      />
-                    )}
-                  </motion.div>
-                ))}
+                  </div>
+                ) : (
+                  participants.slice(0, 4).map((p, i) => (
+                    <motion.div
+                      key={p.id}
+                      className="relative"
+                      whileHover={{ scale: 1.15, zIndex: 20 }}
+                      style={{ zIndex: 10 - i }}
+                    >
+                      <div
+                        className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold text-white ring-3 ring-[#0f0f12] cursor-pointer shadow-lg relative"
+                        style={{ background: `linear-gradient(135deg, ${p.color}, ${p.color}88)` }}
+                        onClick={() => setPinnedUser(p.id)}
+                        title={p.name}
+                      >
+                        {p.initials}
+                        {p.isHost && (
+                          <span className="absolute -top-2 -right-2 px-1.5 py-0.5 bg-amber-500/80 text-white text-[9px] rounded font-bold shadow-lg border border-amber-400">HOST</span>
+                        )}
+                      </div>
+                      {p.isSpeaking && (
+                        <motion.div 
+                          className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-400 rounded-full ring-2 ring-[#0f0f12]"
+                          animate={{ scale: [1, 1.2, 1] }}
+                          transition={{ duration: 0.5, repeat: Infinity }}
+                        />
+                      )}
+                    </motion.div>
+                  ))
+                )}
               </div>
               {participants.length > 4 && (
                 <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-xs text-white/60 font-bold border border-white/10">
                   +{participants.length - 4}
                 </div>
+              )}
+              {/* Show host name if present */}
+              {participants.length === 0 ? (
+                <span className="text-xs text-amber-400 font-semibold ml-2">Host: (waiting for host...)</span>
+              ) : (
+                (() => {
+                  const host = participants.find(p => p.isHost);
+                  if (host) {
+                    return (
+                      <span className="text-xs text-amber-400 font-semibold ml-2">
+                        Host: {host.name}
+                      </span>
+                    );
+                  }
+                  return null;
+                })()
               )}
               <span className="text-xs text-white/40 font-medium ml-1">{participants.length} online</span>
             </div>

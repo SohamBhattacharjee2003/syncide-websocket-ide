@@ -40,11 +40,4 @@ export const toolColors = {
   api: { bg: "#ec4899", icon: "⚡" },
 };
 
-export const participants = [
-  { id: 1, name: "You", initials: "Y", color: "#10b981", isYou: true, hasVideo: true },
-  { id: 2, name: "Emma Wilson", initials: "EW", color: "#8b5cf6", isHost: true, hasVideo: true, isSpeaking: true },
-  { id: 3, name: "James Chen", initials: "JC", color: "#f59e0b", isMuted: true, hasVideo: false },
-  { id: 4, name: "Sarah Miller", initials: "SM", color: "#ec4899", hasVideo: true },
-  { id: 5, name: "Alex Kim", initials: "AK", color: "#3b82f6", hasVideo: false },
-  { id: 6, name: "David Brown", initials: "DB", color: "#ef4444", hasVideo: true },
-];
+export const participants = [];

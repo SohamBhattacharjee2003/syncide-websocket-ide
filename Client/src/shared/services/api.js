@@ -36,7 +36,7 @@ const fetchApi = async (endpoint, options = {}) => {
 // ========== AUTH API ==========
 export const authAPI = {
   register: async (userData) => {
-    const data = await fetchApi("/auth/register", {
+    const data = await fetchApi("/auth/signup", {
       method: "POST",
       body: JSON.stringify(userData),
     });

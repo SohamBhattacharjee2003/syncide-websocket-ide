@@ -58,6 +58,14 @@ export default function EditorPane({
       });
     });
 
+    // Handle large paste events
+    editor.onDidPaste(() => {
+      setTimeout(() => {
+        const pastedCode = editor.getValue();
+        onCodeChange(pastedCode);
+      }, 100);
+    });
+
     // Focus editor
     editor.focus();
   };
@@ -111,7 +119,7 @@ export default function EditorPane({
             scale: 1,
             showSlider: "mouseover",
             renderCharacters: false,
-            maxColumn: 80,
+            maxColumn: 200,
           },
           scrollbar: {
             verticalScrollbarSize: 8,
@@ -155,6 +163,10 @@ export default function EditorPane({
             </motion.div>
           </div>
         }
+        onPaste={(event) => {
+          const pasted = event.clipboardData.getData('text');
+          onCodeChange(pasted);
+        }}
       />
 
       {/* Line highlight glow effect */}

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import logo from "../../../assets/logo.png";
+import { JoinRoomModal } from "../../editor/components";
 import { useAuth } from "../../../shared/context/AuthContext";
 import { workspaceAPI, dashboardAPI } from "../../../shared/services/api";
 
@@ -924,6 +925,14 @@ export default function DashboardPage() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [currentPlan, setCurrentPlan] = useState("free");
   const [error, setError] = useState(null);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  // Handler for quick actions
+  const handleQuickAction = (action) => {
+    if (action === "Join Session") {
+      setShowJoinModal(true);
+    }
+    // Add more actions as needed
+  };
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -1051,6 +1060,21 @@ export default function DashboardPage() {
     <div className="h-screen w-full flex bg-[#060608] overflow-hidden">
       {/* Sidebar */}
       <motion.aside initial={{ x: -100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className={`${sidebarCollapsed ? 'w-16' : 'w-64'} shrink-0 bg-[#0a0a0c] border-r border-white/5 flex flex-col transition-all duration-300`}>
+                {/* Quick Actions Row */}
+                <div className="px-3 pb-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    {quickActions.map((action) => (
+                      <button
+                        key={action.id}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r ${action.color} text-white font-medium shadow hover:shadow-lg transition-all cursor-pointer select-none`}
+                        onClick={() => handleQuickAction(action.name)}
+                      >
+                        <span className="text-lg">{action.icon}</span>
+                        {!sidebarCollapsed && <span className="text-sm">{action.name}</span>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
         <div className="h-14 flex items-center justify-between px-4 border-b border-white/5">
           <Link to="/" className="flex items-center gap-2.5 outline-none cursor-pointer select-none" draggable="false">
             <motion.img src={logo} alt="SyncIDE" className="w-8 h-8 pointer-events-none" animate={{ rotate: [0, 360] }} transition={{ duration: 20, repeat: Infinity, ease: "linear" }} draggable="false" />
@@ -1143,6 +1167,8 @@ export default function DashboardPage() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-6 bg-[#060608]">
+          {/* Join Room Modal */}
+          <JoinRoomModal open={showJoinModal} onClose={() => setShowJoinModal(false)} />
           <AnimatePresence mode="wait">
             {/* Overview Section */}
             {activeSection === "overview" && (
