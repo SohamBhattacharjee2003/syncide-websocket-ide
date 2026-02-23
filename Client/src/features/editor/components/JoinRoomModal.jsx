@@ -1,13 +1,22 @@
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { VscTerminal, VscAdd, VscArrowRight } from "react-icons/vsc";
+import { useAuth } from "../../../shared/context/AuthContext";
 
 export default function JoinRoomModal({ open, isOpen, onClose }) {
   const [roomId, setRoomId] = useState("");
-  const [userName, setUserName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const displayName = user?.username || user?.name || "";
+
+  // Store auth username in localStorage so socket can use it
+  useEffect(() => {
+    if (displayName) {
+      localStorage.setItem("syncide-username", displayName);
+    }
+  }, [displayName]);
 
   const generateRoomId = () => {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -26,8 +35,8 @@ export default function JoinRoomModal({ open, isOpen, onClose }) {
 
   const handleJoinRoom = () => {
     const cleanRoomId = roomId.trim().toUpperCase();
-    if (cleanRoomId && userName.trim()) {
-      localStorage.setItem("syncide-username", userName);
+    if (cleanRoomId) {
+      localStorage.setItem("syncide-username", displayName);
       navigate(`/editor/${cleanRoomId}`);
       onClose?.();
     }
@@ -85,18 +94,15 @@ export default function JoinRoomModal({ open, isOpen, onClose }) {
 
         {/* Content */}
         <div className="p-6 space-y-4">
-          {/* Username */}
-          <div>
-            <label className="block text-sm text-neutral-400 mb-2">
-              Your Name
-            </label>
-            <input
-              type="text"
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              placeholder="Enter your display name"
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white placeholder-neutral-500 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all"
-            />
+          {/* Joining as info */}
+          <div className="flex items-center gap-3 p-3 bg-white/5 border border-white/10 rounded-lg">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white text-sm font-bold">
+              {(displayName || "?").charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <p className="text-sm text-white font-medium">Joining as</p>
+              <p className="text-xs text-emerald-400 font-semibold">{displayName || "Guest"}</p>
+            </div>
           </div>
 
           {/* Room ID */}
@@ -114,6 +120,7 @@ export default function JoinRoomModal({ open, isOpen, onClose }) {
                     setRoomId(e.target.value.toUpperCase());
                   }, 10);
                 }}
+                onKeyDown={(e) => e.key === "Enter" && handleJoinRoom()}
                 placeholder="Enter room code"
                 maxLength={24}
                 className="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white font-mono text-center text-lg tracking-widest placeholder-neutral-500 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all uppercase"
@@ -165,16 +172,16 @@ export default function JoinRoomModal({ open, isOpen, onClose }) {
           </motion.button>
           <motion.button
             onClick={handleJoinRoom}
-            disabled={!roomId.trim() || !userName.trim()}
+            disabled={!roomId.trim()}
             className={`
               flex-1 px-4 py-3 rounded-lg flex items-center justify-center gap-2 font-medium transition-all
-              ${roomId.trim() && userName.trim()
+              ${roomId.trim()
                 ? "bg-linear-to-r from-emerald-500 to-cyan-500 text-white hover:opacity-90"
                 : "bg-white/5 text-neutral-600 cursor-not-allowed"
               }
             `}
-            whileHover={roomId.trim() && userName.trim() ? { scale: 1.01 } : {}}
-            whileTap={roomId.trim() && userName.trim() ? { scale: 0.99 } : {}}
+            whileHover={roomId.trim() ? { scale: 1.01 } : {}}
+            whileTap={roomId.trim() ? { scale: 0.99 } : {}}
           >
             Join Room
             <VscArrowRight className="w-4 h-4" />

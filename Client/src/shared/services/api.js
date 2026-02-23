@@ -23,7 +23,7 @@ const fetchApi = async (endpoint, options = {}) => {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.message || "API request failed");
+      throw new Error(data.error || data.message || "API request failed");
     }
 
     return data;
@@ -167,12 +167,10 @@ export const dashboardAPI = {
 // ========== CODE EXECUTION API ==========
 export const executeAPI = {
   run: async (code, language) => {
-    const response = await fetch(`${API_URL.replace("/api", "")}/execute`, {
+    return fetchApi("/execute", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code, language }),
     });
-    return response.json();
   },
 };
 

@@ -992,6 +992,9 @@ export default function DashboardPage() {
     } catch (err) {
       console.error("Failed to update workspace:", err);
     }
+    // Ensure username is in localStorage for the editor socket
+    const displayName = user?.username || user?.name || "";
+    if (displayName) localStorage.setItem("syncide-username", displayName);
     const wsId = workspace._id || workspace.id;
     const wsType = workspace.workspaceType || workspace.type || "realtime";
     navigate(wsType === "realtime" ? `/editor/${wsId}` : `/editor-plain/${wsId}`);
@@ -1060,21 +1063,6 @@ export default function DashboardPage() {
     <div className="h-screen w-full flex bg-[#060608] overflow-hidden">
       {/* Sidebar */}
       <motion.aside initial={{ x: -100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className={`${sidebarCollapsed ? 'w-16' : 'w-64'} shrink-0 bg-[#0a0a0c] border-r border-white/5 flex flex-col transition-all duration-300`}>
-                {/* Quick Actions Row */}
-                <div className="px-3 pb-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    {quickActions.map((action) => (
-                      <button
-                        key={action.id}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r ${action.color} text-white font-medium shadow hover:shadow-lg transition-all cursor-pointer select-none`}
-                        onClick={() => handleQuickAction(action.name)}
-                      >
-                        <span className="text-lg">{action.icon}</span>
-                        {!sidebarCollapsed && <span className="text-sm">{action.name}</span>}
-                      </button>
-                    ))}
-                  </div>
-                </div>
         <div className="h-14 flex items-center justify-between px-4 border-b border-white/5">
           <Link to="/" className="flex items-center gap-2.5 outline-none cursor-pointer select-none" draggable="false">
             <motion.img src={logo} alt="SyncIDE" className="w-8 h-8 pointer-events-none" animate={{ rotate: [0, 360] }} transition={{ duration: 20, repeat: Infinity, ease: "linear" }} draggable="false" />
@@ -1086,10 +1074,14 @@ export default function DashboardPage() {
             </button>
           )}
         </div>
-        <div className="p-3">
+        <div className="p-3 space-y-2">
           <motion.button onClick={() => setShowCreateModal(true)} className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-medium rounded-xl shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 transition-all cursor-pointer select-none" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
             {!sidebarCollapsed && <span>New Workspace</span>}
+          </motion.button>
+          <motion.button onClick={() => setShowJoinModal(true)} className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-white/[0.06] border border-white/10 text-white/70 hover:text-white hover:bg-white/[0.1] font-medium rounded-xl transition-all cursor-pointer select-none" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+            {!sidebarCollapsed && <span>Join Session</span>}
           </motion.button>
         </div>
         <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto">
@@ -1111,9 +1103,9 @@ export default function DashboardPage() {
         {!sidebarCollapsed && (
           <div className="p-3 border-t border-white/5">
             <Link to="/account" className="flex items-center gap-3 p-2 rounded-xl hover:bg-white/5 transition-colors cursor-pointer select-none outline-none">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white text-sm font-bold">{user.name?.charAt(0).toUpperCase()}</div>
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white text-sm font-bold">{(user.username || user.name || '?').charAt(0).toUpperCase()}</div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">{user.name}</p>
+                <p className="text-sm font-medium text-white truncate">{user.username || user.name || ''}</p>
                 <p className="text-xs text-white/40 truncate">{user.email}</p>
               </div>
             </Link>
@@ -1158,7 +1150,7 @@ export default function DashboardPage() {
               </AnimatePresence>
             </div>
             <Link to="/account" className="flex items-center gap-2 p-1.5 pr-3 rounded-lg hover:bg-white/5 transition-colors cursor-pointer">
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white text-xs font-bold">{user.name?.charAt(0).toUpperCase()}</div>
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center text-white text-xs font-bold">{(user.username || user.name || '?').charAt(0).toUpperCase()}</div>
             </Link>
             <button onClick={handleLogout} className="p-2 rounded-lg hover:bg-red-500/10 text-white/50 hover:text-red-400 transition-colors cursor-pointer" title="Sign Out">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
@@ -1176,7 +1168,7 @@ export default function DashboardPage() {
                 {/* Welcome Banner */}
                 <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="relative p-5 bg-gradient-to-r from-emerald-500/10 via-cyan-500/5 to-violet-500/10 border border-emerald-500/20 rounded-2xl overflow-hidden">
                   <div className="relative z-10">
-                    <h2 className="text-xl font-bold text-white mb-1">Welcome back, {user.name?.split(' ')[0]}! 👋</h2>
+                    <h2 className="text-xl font-bold text-white mb-1">Welcome back, {(user.username || user.name || '').split(' ')[0]}! 👋</h2>
                     <p className="text-white/60 text-sm">{workspaces.length} workspaces • {notifications.filter(n => n.unread).length} notifications</p>
                   </div>
                 </motion.div>

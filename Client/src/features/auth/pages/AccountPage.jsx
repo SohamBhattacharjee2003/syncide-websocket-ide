@@ -121,11 +121,13 @@ function ProgressBar({ value, max, color = "emerald" }) {
 
 // Profile Section
 function ProfileSection({ user, onEdit }) {
-  if (!user || !user.name) {
+  const displayName = user?.username || user?.name || "";
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedName, setEditedName] = useState(displayName);
+
+  if (!user || !displayName) {
     return null;
   }
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedName, setEditedName] = useState(user.name);
 
   const handleSave = () => {
     // Save logic here
@@ -147,7 +149,7 @@ function ProfileSection({ user, onEdit }) {
       <div className="flex items-center gap-6 p-6 bg-white/5 rounded-2xl border border-white/5">
         <div className="relative group">
           <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center text-3xl font-bold text-white">
-            {user.name.split(" ").map(n => n[0]).join("")}
+            {displayName.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)}
           </div>
           <motion.button
             whileHover={{ scale: 1.1 }}
@@ -186,7 +188,7 @@ function ProfileSection({ user, onEdit }) {
               </div>
             ) : (
               <>
-                <h3 className="text-2xl font-bold text-white">{user && user.name ? user.name : ""}</h3>
+                <h3 className="text-2xl font-bold text-white">{displayName}</h3>
                 <motion.button
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}

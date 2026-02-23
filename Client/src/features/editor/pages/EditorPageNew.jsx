@@ -77,6 +77,7 @@ import {
 
 // Chat
 import { FloatingChat } from "../components";
+import VideoTile from "../components/VideoTile";
 
 // ═══════════════════════════════════════════════════════════════
 // SYNCIDE - Professional Collaborative Code Editor
@@ -85,6 +86,10 @@ import { FloatingChat } from "../components";
 
 import socket from "../../../shared/socket/socket";
 import { useEffect } from "react";
+import { useAuth } from "../../../shared/context/AuthContext";
+import useMediaStream from "../hooks/useMediaStream";
+import useWebRTC from "../hooks/useWebRTC";
+import useAudioLevel from "../hooks/useAudioLevel";
 
 export default function EditorPage() {
   const { roomId } = useParams();
@@ -111,10 +116,12 @@ export default function EditorPage() {
   const [copied, setCopied] = useState(false);
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [terminalOutput, setTerminalOutput] = useState("Welcome to SyncIDE Terminal\n$ ");
+  const [terminalInput, setTerminalInput] = useState("");
+  const [terminalHistory, setTerminalHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const [isExecuting, setIsExecuting] = useState(false);
   const [showChat, setShowChat] = useState(false);
-  const [isMicOn, setIsMicOn] = useState(true);
-  const [isCameraOn, setIsCameraOn] = useState(true);
+  const [chatUnread, setChatUnread] = useState(0);
   const [activePanel, setActivePanel] = useState("explorer");
   const [contextMenu, setContextMenu] = useState({ show: false, x: 0, y: 0, item: null });
   const [showAccountMenu, setShowAccountMenu] = useState(false);
@@ -123,33 +130,165 @@ export default function EditorPage() {
   const [isSyncing, setIsSyncing] = useState(false);
   // Real-time participants state
   const [participants, setParticipants] = useState([]);
-  // Get username from localStorage (set by JoinRoomModal)
-  const userName = localStorage.getItem("syncide-username") || "";
+  // Get username from auth context (logged-in user)
+  const { user: authUser } = useAuth();
+  const userName = authUser?.username || authUser?.name || localStorage.getItem("syncide-username") || "";
 
-  // Join room and listen for participants
+  // WebRTC media hooks
+  const {
+    localStream,
+    screenStream,
+    localVideoRef,
+    isMicOn,
+    isCameraOn,
+    isScreenSharing,
+    toggleMic,
+    toggleCamera,
+    toggleScreenShare,
+    stopAll: stopMedia,
+  } = useMediaStream();
+
+  const normalizedRoomId = roomId ? roomId.toUpperCase() : roomId;
+  const { remoteStreams, joinCall, leaveCall } = useWebRTC(socket, normalizedRoomId, userName, localStream, screenStream);
+
+  // Audio level detection — shows who is speaking
+  const { isSpeaking: localSpeaking, audioLevel: localAudioLevel } = useAudioLevel(localStream);
+
+  // Track remote speaking states
+  const [remoteSpeaking, setRemoteSpeaking] = useState({});
+
+  // Emit local speaking state to all peers
   useEffect(() => {
-    // Send username to backend for participant tracking
-    // Always use uppercase roomId for consistency
-    const normalizedRoomId = roomId ? roomId.toUpperCase() : roomId;
+    if (!normalizedRoomId) return;
+    socket.emit("speaking-state", { roomId: normalizedRoomId, isSpeaking: localSpeaking });
+  }, [localSpeaking, normalizedRoomId]);
+
+  // Listen for remote speaking state changes
+  useEffect(() => {
+    const handler = ({ peerId, isSpeaking }) => {
+      setRemoteSpeaking(prev => ({ ...prev, [peerId]: isSpeaking }));
+    };
+    socket.on("speaking-state", handler);
+    return () => socket.off("speaking-state", handler);
+  }, []);
+
+  const terminalInputRef = useRef(null);
+  const terminalEndRef = useRef(null);
+
+  // Join room and listen for participants — wait for auth name
+  useEffect(() => {
+    // Don't join until we have a real username from auth
+    if (!userName) return;
+
     socket.emit("join-room", normalizedRoomId, userName);
     socket.on("room-users", (userList) => {
-      // Debug: Log the participant list received from backend
-      console.log("[room-users] received:", userList);
-      // Mark the current user in the participant list
       const markedList = userList.map(u => ({
         ...u,
-        isYou: u.name === userName
+        isYou: u.id === socket.id || u.name === userName,
       }));
-      // Sort so host is always first, only one host
       const host = markedList.find(u => u.isHost);
       const others = markedList.filter(u => !u.isHost);
       const sorted = host ? [host, ...others] : [...others];
       setParticipants(sorted);
     });
+    // Auto-join the video call
+    joinCall();
     return () => {
       socket.off("room-users");
+      leaveCall();
+      stopMedia();
     };
-  }, [roomId, userName]);
+  }, [normalizedRoomId, userName]);
+
+  // Auto-scroll terminal
+  useEffect(() => {
+    terminalEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [terminalOutput]);
+
+  // Interactive terminal submit
+  const handleTerminalSubmit = async (e) => {
+    e.preventDefault();
+    const cmd = terminalInput.trim();
+    if (!cmd) return;
+    setTerminalHistory((prev) => [...prev, cmd]);
+    setHistoryIndex(-1);
+    setTerminalInput("");
+    if (cmd === "clear") {
+      setTerminalOutput("$ ");
+      return;
+    }
+    setTerminalOutput((prev) => `${prev}${cmd}\n`);
+    setIsExecuting(true);
+    try {
+      const { executeAPI } = await import("../../../shared/services/api");
+      const result = await executeAPI.run(cmd, activeFile?.language || "javascript");
+      if (result.error && !result.output) {
+        setTerminalOutput((prev) => `${prev}❌ ${result.error}\n\n$ `);
+      } else {
+        const output = result.output || "(No output)";
+        const errorOutput = result.error ? `\n⚠️ ${result.error}` : "";
+        setTerminalOutput((prev) => `${prev}${output}${errorOutput}\n\n$ `);
+      }
+    } catch (err) {
+      setTerminalOutput((prev) => `${prev}❌ ${err.message}\n\n$ `);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const handleTerminalKeyDown = (e) => {
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (terminalHistory.length === 0) return;
+      const newIndex = historyIndex === -1 ? terminalHistory.length - 1 : Math.max(0, historyIndex - 1);
+      setHistoryIndex(newIndex);
+      setTerminalInput(terminalHistory[newIndex]);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (historyIndex === -1) return;
+      const newIndex = historyIndex + 1;
+      if (newIndex >= terminalHistory.length) {
+        setHistoryIndex(-1);
+        setTerminalInput("");
+      } else {
+        setHistoryIndex(newIndex);
+        setTerminalInput(terminalHistory[newIndex]);
+      }
+    }
+  };
+
+  // ═══ Toast notification ═══
+  const [toast, setToast] = useState(null);
+  const showToast = (message, type = "warning") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  // ═══ Leave room properly ═══
+  const handleLeaveRoom = () => {
+    socket.emit("leave-room", normalizedRoomId);
+    leaveCall();
+    stopMedia();
+    navigate("/dashboard");
+  };
+
+  // ═══ Camera toggle with screen share check ═══
+  const handleCameraToggle = () => {
+    if (isScreenSharing) {
+      showToast("Stop screen sharing first to turn on camera", "warning");
+      return;
+    }
+    toggleCamera();
+  };
+
+  // ═══ Screen share toggle (stops camera if needed) ═══
+  const handleScreenShareToggle = async () => {
+    if (!isScreenSharing && isCameraOn) {
+      // Camera is on — stop camera, then start screen share
+      toggleCamera();
+    }
+    toggleScreenShare();
+  };
 
   // Find file by ID
   const findFile = (id) => files.find(f => f.id === id);
@@ -276,32 +415,19 @@ export default function EditorPage() {
   // Run code
   const runCode = async () => {
     if (!activeFile || isExecuting) return;
-    
+
     setShowTerminal(true);
     setIsExecuting(true);
-    
+
     const code = editorRef.current?.getValue() || activeFile.content || "";
     const language = activeFile.language;
-    
-    console.log("Running code:");
-    console.log("Language:", language);
-    console.log("Code length:", code.length);
-    console.log("Code:", code);
-    
-    setTerminalOutput(prev => 
-      `${prev}Running ${activeFile.name}...\n\n`
-    );
-    
+
+    setTerminalOutput(prev => `${prev}Running ${activeFile.name}...\n\n`);
+
     try {
-      const response = await fetch("http://localhost:5000/execute", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ code, language }),
-      });
-      
-      const result = await response.json();
+      // Use shared API service for code execution
+      const { executeAPI } = await import("../../../shared/services/api");
+      const result = await executeAPI.run(code, language);
       
       if (result.error && !result.output) {
         setTerminalOutput(prev => 
@@ -375,7 +501,7 @@ export default function EditorPage() {
       {/* ══════════════════════ HEADER ══════════════════════ */}
       <header className="flex flex-col bg-[#0a0a0c]">
         {/* Top Bar - Main Header */}
-        <div className="h-16 flex items-center justify-between px-5 bg-gradient-to-r from-[#0f0f12] via-[#131316] to-[#0f0f12] border-b border-white/5">
+        <div className="h-16 flex items-center justify-between px-5 bg-linear-to-r from-[#0f0f12] via-[#131316] to-[#0f0f12] border-b border-white/5">
           
           {/* Left Section - Logo & Room */}
           <div className="flex items-center gap-4">
@@ -383,7 +509,7 @@ export default function EditorPage() {
             <motion.div 
               className="flex items-center gap-3 cursor-pointer group" 
               whileHover={{ scale: 1.02 }} 
-              onClick={() => navigate("/")}
+              onClick={handleLeaveRoom}
             >
               <div className="relative">
                 <motion.img
@@ -409,7 +535,7 @@ export default function EditorPage() {
             {/* Room Info */}
             <motion.button
               onClick={copyRoomId}
-              className="group flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] hover:border-emerald-500/30 transition-all duration-200"
+              className="group flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white/3 hover:bg-white/6 border border-white/6 hover:border-emerald-500/30 transition-all duration-200"
               whileTap={{ scale: 0.98 }}
             >
               <div className="relative">
@@ -444,7 +570,7 @@ export default function EditorPage() {
           <div className="flex items-center gap-5">
             {/* Live Indicator */}
             <motion.div
-              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-red-500/15 to-orange-500/15 rounded-xl border border-red-500/30"
+              className="flex items-center gap-2 px-4 py-2 bg-linear-to-r from-red-500/15 to-orange-500/15 rounded-xl border border-red-500/30"
               animate={{ opacity: [1, 0.8, 1] }}
               transition={{ duration: 2, repeat: Infinity }}
             >
@@ -462,7 +588,7 @@ export default function EditorPage() {
                 {participants.length === 0 ? (
                   <div className="relative">
                     <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold text-white ring-3 ring-[#0f0f12] shadow-lg relative bg-gradient-to-br from-amber-400 to-yellow-300"
+                      className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold text-white ring-3 ring-[#0f0f12] shadow-lg relative bg-linear-to-br from-amber-400 to-yellow-300"
                       title="Host"
                     >
                       H
@@ -528,7 +654,7 @@ export default function EditorPage() {
           <div className="flex items-center gap-3">
             {/* Sync Status */}
             <motion.div
-              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/[0.05]"
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/3 border border-white/5"
               title={isSyncing ? "Syncing..." : "All changes synced"}
             >
               <motion.div
@@ -547,7 +673,7 @@ export default function EditorPage() {
             <div className="relative">
               <motion.button
                 onClick={(e) => { e.stopPropagation(); setShowNotifications(!showNotifications); setShowAccountMenu(false); }}
-                className="relative w-10 h-10 rounded-xl bg-white/[0.03] border border-white/[0.05] flex items-center justify-center text-white/50 hover:text-white hover:bg-white/[0.06] transition-all"
+                className="relative w-10 h-10 rounded-xl bg-white/3 border border-white/5 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/6 transition-all"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
@@ -567,10 +693,10 @@ export default function EditorPage() {
                     initial={{ opacity: 0, y: 8, scale: 0.96 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                    className="absolute top-full right-0 mt-2 w-80 bg-[#18181b]/95 backdrop-blur-xl border border-white/[0.08] rounded-2xl shadow-2xl shadow-black/50 overflow-hidden z-50"
+                    className="absolute top-full right-0 mt-2 w-80 bg-[#18181b]/95 backdrop-blur-xl border border-white/8 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden z-50"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="p-4 border-b border-white/[0.05] flex items-center justify-between">
+                    <div className="p-4 border-b border-white/5 flex items-center justify-between">
                       <span className="text-sm font-bold text-white">Notifications</span>
                       <button 
                         onClick={() => setHasNotifications(false)}
@@ -593,18 +719,18 @@ export default function EditorPage() {
             <div className="relative">
               <motion.button
                 onClick={(e) => { e.stopPropagation(); setShowAccountMenu(!showAccountMenu); setShowNotifications(false); }}
-                className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/[0.05] hover:bg-white/[0.06] transition-all"
+                className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/3 border border-white/5 hover:bg-white/6 transition-all"
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
               >
                 <div className="relative">
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 via-cyan-500 to-blue-500 flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-emerald-500/20">
-                    SB
+                  <div className="w-9 h-9 rounded-xl bg-linear-to-br from-emerald-400 via-cyan-500 to-blue-500 flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-emerald-500/20">
+                    {(userName || '?').slice(0, 2).toUpperCase()}
                   </div>
                   <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-400 rounded-full ring-2 ring-[#0f0f12]" />
                 </div>
                 <div className="hidden lg:flex flex-col items-start">
-                  <span className="text-sm font-semibold text-white">Soham B.</span>
+                  <span className="text-sm font-semibold text-white">{userName || 'User'}</span>
                   <span className="text-[10px] text-emerald-400 font-bold">✦ Pro</span>
                 </div>
                 <ChevronDownIcon />
@@ -616,22 +742,22 @@ export default function EditorPage() {
                     initial={{ opacity: 0, y: 8, scale: 0.96 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                    className="absolute top-full right-0 mt-2 w-64 bg-[#18181b]/95 backdrop-blur-xl border border-white/[0.08] rounded-2xl shadow-2xl shadow-black/50 overflow-hidden z-50"
+                    className="absolute top-full right-0 mt-2 w-64 bg-[#18181b]/95 backdrop-blur-xl border border-white/8 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden z-50"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {/* User Info */}
-                    <div className="p-4 border-b border-white/[0.05]">
+                    <div className="p-4 border-b border-white/5">
                       <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 via-cyan-500 to-blue-500 flex items-center justify-center text-base font-bold text-white shadow-lg">
-                          SB
+                        <div className="w-12 h-12 rounded-xl bg-linear-to-br from-emerald-400 via-cyan-500 to-blue-500 flex items-center justify-center text-base font-bold text-white shadow-lg">
+                          {(userName || '?').slice(0, 2).toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-white truncate">Soham Bhattacharjee</p>
-                          <p className="text-xs text-white/40 truncate">soham@example.com</p>
+                          <p className="text-sm font-bold text-white truncate">{userName || 'User'}</p>
+                          <p className="text-xs text-white/40 truncate">{authUser?.email || ''}</p>
                         </div>
                       </div>
                       <div className="mt-3 flex items-center gap-2">
-                        <span className="px-2.5 py-1 text-xs font-bold bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 text-emerald-400 rounded-lg border border-emerald-500/20">
+                        <span className="px-2.5 py-1 text-xs font-bold bg-linear-to-r from-emerald-500/20 to-cyan-500/20 text-emerald-400 rounded-lg border border-emerald-500/20">
                           ✦ Pro
                         </span>
                         <span className="text-xs text-white/30">•</span>
@@ -647,14 +773,14 @@ export default function EditorPage() {
                       <AccountMenuItem icon={<HistoryIcon />} label="Activity" />
                     </div>
 
-                    <div className="border-t border-white/[0.05] p-2">
+                    <div className="border-t border-white/5 p-2">
                       <AccountMenuItem icon={<HelpIcon />} label="Help & Docs" />
                       <AccountMenuItem icon={<FeedbackIcon />} label="Feedback" />
                     </div>
 
-                    <div className="border-t border-white/[0.05] p-2">
+                    <div className="border-t border-white/5 p-2">
                       <button 
-                        onClick={() => navigate("/")}
+                        onClick={handleLeaveRoom}
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-red-400 hover:bg-red-500/10 transition-colors"
                       >
                         <LeaveIcon />
@@ -671,7 +797,7 @@ export default function EditorPage() {
         {/* Bottom Bar - Toolbar */}
         <div className="h-12 flex items-center justify-between px-5 bg-[#0d0d10] border-b border-white/5">
           {/* File Tabs */}
-          <div className="flex items-center gap-1 bg-black/30 rounded-lg p-1 border border-white/[0.03]">
+          <div className="flex items-center gap-1 bg-black/30 rounded-lg p-1 border border-white/3">
             {openTabs.map(tab => {
               const lang = languages[tab.language];
               const isToolTab = tab.type === "tool";
@@ -683,8 +809,8 @@ export default function EditorPage() {
                   onClick={() => switchTab(tab)}
                   className={`group relative flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer transition-all duration-200 ${
                     isActive 
-                      ? "bg-white/[0.08] text-white shadow-sm" 
-                      : "text-white/40 hover:text-white/60 hover:bg-white/[0.03]"
+                      ? "bg-white/8 text-white shadow-sm" 
+                      : "text-white/40 hover:text-white/60 hover:bg-white/3"
                   }`}
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.99 }}
@@ -692,7 +818,7 @@ export default function EditorPage() {
                   {isActive && (
                     <motion.div 
                       layoutId="activeTab"
-                      className="absolute bottom-0 left-1/2 -translate-x-1/2 w-10 h-0.5 bg-gradient-to-r from-emerald-400 to-cyan-400 rounded-full"
+                      className="absolute bottom-0 left-1/2 -translate-x-1/2 w-10 h-0.5 bg-linear-to-r from-emerald-400 to-cyan-400 rounded-full"
                     />
                   )}
                   {isToolTab ? (
@@ -725,7 +851,7 @@ export default function EditorPage() {
             <div className="relative">
               <motion.button
                 onClick={(e) => { e.stopPropagation(); setShowLangDropdown(!showLangDropdown); }}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.05] text-white/60 hover:text-white hover:bg-white/[0.06] transition-all"
+                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/3 border border-white/5 text-white/60 hover:text-white hover:bg-white/6 transition-all"
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
               >
@@ -745,7 +871,7 @@ export default function EditorPage() {
                     initial={{ opacity: 0, y: 8, scale: 0.96 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                    className="absolute top-full right-0 mt-2 w-48 bg-[#18181b]/95 backdrop-blur-xl border border-white/[0.08] rounded-xl shadow-2xl shadow-black/50 overflow-hidden z-50"
+                    className="absolute top-full right-0 mt-2 w-48 bg-[#18181b]/95 backdrop-blur-xl border border-white/8 rounded-xl shadow-2xl shadow-black/50 overflow-hidden z-50"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="p-2 max-h-64 overflow-y-auto">
@@ -756,7 +882,7 @@ export default function EditorPage() {
                           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all ${
                             activeFile?.language === lang.id 
                               ? "bg-emerald-500/10 text-emerald-400" 
-                              : "text-white/60 hover:text-white hover:bg-white/[0.05]"
+                              : "text-white/60 hover:text-white hover:bg-white/5"
                           }`}
                         >
                           <div 
@@ -792,7 +918,7 @@ export default function EditorPage() {
             {/* Run Button */}
             <motion.button
               onClick={runCode}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-sm font-bold shadow-lg shadow-emerald-500/30"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-linear-to-r from-emerald-500 to-emerald-600 text-white text-sm font-bold shadow-lg shadow-emerald-500/30"
               whileHover={{ scale: 1.03, boxShadow: "0 10px 30px rgba(16, 185, 129, 0.4)" }}
               whileTap={{ scale: 0.98 }}
             >
@@ -928,29 +1054,60 @@ export default function EditorPage() {
                   </div>
                 </div>
                 {/* Terminal Output */}
-                <div className="flex-1 overflow-auto p-4 font-mono text-sm text-gray-300 whitespace-pre-wrap leading-relaxed bg-[#0a0a0c]">
+                <div className="flex-1 overflow-auto p-4 font-mono text-sm text-gray-300 whitespace-pre-wrap leading-relaxed bg-[#0a0a0c]" onClick={() => terminalInputRef.current?.focus()}>
                   {terminalOutput}
                   {isExecuting && (
                     <span className="inline-block w-2 h-4 bg-emerald-400 animate-pulse ml-0.5" />
                   )}
+                  <div ref={terminalEndRef} />
                 </div>
+                {/* Terminal Input */}
+                <form onSubmit={handleTerminalSubmit} className="flex items-center gap-2 px-4 py-2 bg-[#0a0a0c] border-t border-[#1e1e24]">
+                  <span className="text-emerald-400 font-mono text-sm select-none">$</span>
+                  <input
+                    ref={terminalInputRef}
+                    value={terminalInput}
+                    onChange={(e) => setTerminalInput(e.target.value)}
+                    onKeyDown={handleTerminalKeyDown}
+                    disabled={isExecuting}
+                    placeholder={isExecuting ? "Running..." : "Type a command..."}
+                    className="flex-1 bg-transparent text-gray-200 font-mono text-sm outline-none placeholder-gray-600"
+                    autoComplete="off"
+                    spellCheck="false"
+                  />
+                </form>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
 
         {/* ═══════ RIGHT PANEL - GOOGLE MEET STYLE ═══════ */}
-        <div className="w-[420px] bg-[#111114] border-l border-[#1e1e24] flex flex-col overflow-hidden">
+        <div className="w-105 bg-[#111114] border-l border-[#1e1e24] flex flex-col overflow-hidden">
           {/* Video Layout - Changes based on pinned state */}
           {(() => {
-            const visibleParticipants = participants.slice(0, 3);
-            const hiddenParticipants = participants.slice(3);
+            // Helper: get the video stream for a participant
+            const getStream = (p) => {
+              if (p.isYou) {
+                return isScreenSharing ? screenStream : localStream;
+              }
+              const remote = remoteStreams.get(p.id);
+              return remote?.stream || null;
+            };
+
+            // Inject real speaking state into participants
+            const participantsWithSpeaking = participants.map(p => ({
+              ...p,
+              isSpeaking: p.isYou ? localSpeaking : !!remoteSpeaking[p.id],
+            }));
+
+            const visibleParticipants = participantsWithSpeaking.slice(0, 3);
+            const hiddenParticipants = participantsWithSpeaking.slice(3);
             const hiddenCount = hiddenParticipants.length;
 
             // If someone is pinned, show spotlight layout
             if (pinnedUser) {
-              const mainUser = participants.find(p => p.id === pinnedUser);
-              const otherParticipants = participants.filter(p => p.id !== pinnedUser);
+              const mainUser = participantsWithSpeaking.find(p => p.id === pinnedUser);
+              const otherParticipants = participantsWithSpeaking.filter(p => p.id !== pinnedUser);
               const visibleOthers = otherParticipants.slice(0, 2);
               const hiddenOthers = otherParticipants.slice(2);
               const hiddenOthersCount = hiddenOthers.length;
@@ -959,26 +1116,14 @@ export default function EditorPage() {
                 <>
                   {/* Pinned User - Large Display */}
                   <div className="p-4">
-                    <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-[#1a1a1f] to-[#0d0d0f] group" style={{ aspectRatio: '16/10', minHeight: '220px' }}>
+                    <div className="relative rounded-2xl overflow-hidden bg-linear-to-br from-[#1a1a1f] to-[#0d0d0f] group" style={{ aspectRatio: '16/10', minHeight: '220px' }}>
                       <div className="absolute inset-0 opacity-40" style={{ background: `radial-gradient(circle at 40% 30%, ${mainUser?.color}50, transparent 60%)` }} />
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <motion.div className="relative">
-                          {mainUser?.isSpeaking && (
-                            <motion.div 
-                              className="absolute -inset-4 rounded-3xl" 
-                              style={{ border: `3px solid ${mainUser.color}` }} 
-                              animate={{ scale: [1, 1.1, 1], opacity: [0.8, 0.2, 0.8] }} 
-                              transition={{ duration: 1.5, repeat: Infinity }} 
-                            />
-                          )}
-                          <div 
-                            className="w-24 h-24 rounded-2xl flex items-center justify-center text-white text-3xl font-bold shadow-2xl" 
-                            style={{ background: `linear-gradient(135deg, ${mainUser?.color}, ${mainUser?.color}88)` }}
-                          >
-                            {mainUser?.initials}
-                          </div>
-                        </motion.div>
-                      </div>
+                      <VideoTile
+                        stream={getStream(mainUser)}
+                        muted={mainUser?.isYou}
+                        initials={mainUser?.initials}
+                        color={mainUser?.color}
+                      />
                       {/* User Info */}
                       <div className="absolute bottom-3 left-3 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-black/70 backdrop-blur-sm text-sm text-white">
                         {mainUser?.isSpeaking && (
@@ -1018,16 +1163,16 @@ export default function EditorPage() {
                   {/* Controls */}
                   <div className="px-3 pb-4">
                     <div className="flex justify-center gap-2 p-2.5 rounded-2xl bg-[#0a0a0c] border border-[#1e1e24]">
-                      <CtrlBtn active={isMicOn} danger={!isMicOn} onClick={() => setIsMicOn(!isMicOn)}>
+                      <CtrlBtn active={isMicOn} danger={!isMicOn} onClick={toggleMic}>
                         {isMicOn ? <MicIcon /> : <MicOffIcon />}
                       </CtrlBtn>
-                      <CtrlBtn active={isCameraOn} danger={!isCameraOn} onClick={() => setIsCameraOn(!isCameraOn)}>
+                      <CtrlBtn active={isCameraOn} danger={!isCameraOn} onClick={handleCameraToggle}>
                         {isCameraOn ? <VideoIcon /> : <VideoOffIcon />}
                       </CtrlBtn>
-                      <CtrlBtn><ScreenIcon /></CtrlBtn>
+                      <CtrlBtn active={isScreenSharing} onClick={handleScreenShareToggle}><ScreenIcon /></CtrlBtn>
                       <div className="w-px h-8 bg-[#2a2a32]" />
                       <motion.button 
-                        onClick={() => navigate("/")} 
+                        onClick={handleLeaveRoom} 
                         className="p-2.5 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-all" 
                         whileHover={{ scale: 1.05 }} 
                         whileTap={{ scale: 0.95 }}
@@ -1054,24 +1199,12 @@ export default function EditorPage() {
                           style={{ aspectRatio: '4/3', minHeight: '100px' }}
                         >
                           <div className="absolute inset-0 opacity-30" style={{ background: `radial-gradient(circle at 50% 40%, ${p.color}60, transparent 70%)` }} />
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <motion.div className="relative">
-                              {p.isSpeaking && (
-                                <motion.div 
-                                  className="absolute -inset-2 rounded-xl" 
-                                  style={{ border: `2px solid ${p.color}` }} 
-                                  animate={{ scale: [1, 1.1, 1], opacity: [0.7, 0.2, 0.7] }} 
-                                  transition={{ duration: 1.2, repeat: Infinity }} 
-                                />
-                              )}
-                              <div 
-                                className="w-14 h-14 rounded-xl flex items-center justify-center text-white text-lg font-bold shadow-lg" 
-                                style={{ background: `linear-gradient(135deg, ${p.color}, ${p.color}aa)` }}
-                              >
-                                {p.initials}
-                              </div>
-                            </motion.div>
-                          </div>
+                          <VideoTile
+                            stream={getStream(p)}
+                            muted={p.isYou}
+                            initials={p.initials}
+                            color={p.color}
+                          />
                           <div className="absolute bottom-2 left-2 right-2 text-xs text-white font-medium bg-black/60 backdrop-blur-sm px-2 py-1 rounded-lg truncate text-center">
                             {p.isYou ? "You" : p.name.split(" ")[0]}
                           </div>
@@ -1112,29 +1245,17 @@ export default function EditorPage() {
                         animate={{ opacity: 1, y: 0 }} 
                         transition={{ delay: i * 0.08 }}
                         onClick={() => setPinnedUser(p.id)}
-                        className={`relative flex-1 min-h-[100px] rounded-2xl overflow-hidden cursor-pointer bg-[#1a1a1f] group hover:ring-2 hover:ring-white/20 transition-all ${
+                        className={`relative flex-1 min-h-25 rounded-2xl overflow-hidden cursor-pointer bg-[#1a1a1f] group hover:ring-2 hover:ring-white/20 transition-all ${
                           p.isSpeaking ? "ring-2 ring-emerald-500/50" : ""
                         }`}
                       >
                         <div className="absolute inset-0 opacity-30" style={{ background: `radial-gradient(circle at 50% 40%, ${p.color}60, transparent 70%)` }} />
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <motion.div className="relative">
-                            {p.isSpeaking && (
-                              <motion.div 
-                                className="absolute -inset-3 rounded-2xl" 
-                                style={{ border: `3px solid ${p.color}` }} 
-                                animate={{ scale: [1, 1.08, 1], opacity: [0.8, 0.3, 0.8] }} 
-                                transition={{ duration: 1.3, repeat: Infinity }} 
-                              />
-                            )}
-                            <div 
-                              className="w-16 h-16 rounded-xl flex items-center justify-center text-white text-xl font-bold shadow-lg" 
-                              style={{ background: `linear-gradient(135deg, ${p.color}, ${p.color}aa)` }}
-                            >
-                              {p.initials}
-                            </div>
-                          </motion.div>
-                        </div>
+                        <VideoTile
+                          stream={getStream(p)}
+                          muted={p.isYou}
+                          initials={p.initials}
+                          color={p.color}
+                        />
                         
                         {/* Speaking indicator */}
                         {p.isSpeaking && (
@@ -1180,7 +1301,7 @@ export default function EditorPage() {
                         initial={{ opacity: 0, y: 20 }} 
                         animate={{ opacity: 1, y: 0 }} 
                         transition={{ delay: 0.25 }}
-                        className="flex-1 min-h-[100px]"
+                        className="flex-1 min-h-25"
                       >
                         <ParticipantsOverflowTile 
                           hiddenParticipants={hiddenParticipants}
@@ -1196,16 +1317,16 @@ export default function EditorPage() {
                 {/* Controls - Fixed at bottom */}
                 <div className="px-4 py-3 shrink-0 border-t border-[#1e1e24] bg-[#111114]">
                   <div className="flex justify-center gap-2 p-2.5 rounded-2xl bg-[#0a0a0c] border border-[#1e1e24]">
-                    <CtrlBtn active={isMicOn} danger={!isMicOn} onClick={() => setIsMicOn(!isMicOn)}>
+                    <CtrlBtn active={isMicOn} danger={!isMicOn} onClick={toggleMic}>
                       {isMicOn ? <MicIcon /> : <MicOffIcon />}
                     </CtrlBtn>
-                    <CtrlBtn active={isCameraOn} danger={!isCameraOn} onClick={() => setIsCameraOn(!isCameraOn)}>
+                    <CtrlBtn active={isCameraOn} danger={!isCameraOn} onClick={handleCameraToggle}>
                       {isCameraOn ? <VideoIcon /> : <VideoOffIcon />}
                     </CtrlBtn>
-                    <CtrlBtn><ScreenIcon /></CtrlBtn>
+                    <CtrlBtn active={isScreenSharing} onClick={handleScreenShareToggle}><ScreenIcon /></CtrlBtn>
                     <div className="w-px h-8 bg-[#2a2a32]" />
                     <motion.button 
-                      onClick={() => navigate("/")} 
+                      onClick={handleLeaveRoom} 
                       className="p-2.5 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-all" 
                       whileHover={{ scale: 1.05 }} 
                       whileTap={{ scale: 0.95 }}
@@ -1220,8 +1341,57 @@ export default function EditorPage() {
         </div>
       </div>
 
+      {/* ══════════════════════ REMOTE AUDIO PLAYBACK ══════════════════════ */}
+      {/* Hidden audio elements that play remote peers' audio streams */}
+      {Array.from(remoteStreams.entries()).map(([peerId, { stream }]) => (
+        <audio
+          key={`audio-${peerId}`}
+          autoPlay
+          playsInline
+          ref={(el) => { if (el && stream) el.srcObject = stream; }}
+          style={{ display: "none" }}
+        />
+      ))}
+
+      {/* ══════════════════════ TOAST NOTIFICATION ══════════════════════ */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -40, x: "-50%" }}
+            animate={{ opacity: 1, y: 0, x: "-50%" }}
+            exit={{ opacity: 0, y: -40, x: "-50%" }}
+            className="fixed top-6 left-1/2 z-[9999] px-5 py-3 rounded-xl shadow-2xl backdrop-blur-lg border flex items-center gap-3 text-sm font-medium"
+            style={{
+              background: toast.type === "warning" ? "rgba(245, 158, 11, 0.15)" : "rgba(16, 185, 129, 0.15)",
+              borderColor: toast.type === "warning" ? "rgba(245, 158, 11, 0.3)" : "rgba(16, 185, 129, 0.3)",
+              color: toast.type === "warning" ? "#fbbf24" : "#34d399",
+            }}
+          >
+            <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              {toast.type === "warning" ? (
+                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" strokeLinecap="round" strokeLinejoin="round" />
+              ) : (
+                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" strokeLinecap="round" strokeLinejoin="round" />
+              )}
+            </svg>
+            {toast.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+
+
+
       {/* ══════════════════════ FLOATING CHAT ══════════════════════ */}
-      <FloatingChat isOpen={showChat} onToggle={() => setShowChat(!showChat)} />
+      <FloatingChat
+        isOpen={showChat}
+        onToggle={() => setShowChat(!showChat)}
+        socket={socket}
+        roomId={normalizedRoomId}
+        userName={userName}
+        participants={participants}
+        onUnreadChange={setChatUnread}
+      />
 
       {/* ══════════════════════ STATUS BAR ══════════════════════ */}
       <footer className="h-6 bg-[#111114] border-t border-[#1e1e24] flex items-center justify-between px-3 text-[10px]">
@@ -1246,7 +1416,7 @@ export default function EditorPage() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="fixed bg-[#1a1a1f] border border-[#2a2a32] rounded-lg shadow-xl py-1 z-50 min-w-[140px]"
+            className="fixed bg-[#1a1a1f] border border-[#2a2a32] rounded-lg shadow-xl py-1 z-50 min-w-35"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
             <button 
@@ -1322,7 +1492,7 @@ function HeaderButton({ icon, tooltip, shortcut, onClick, active, badge, color }
       className={`relative p-2 rounded-lg transition-all ${
         active 
           ? "text-emerald-400 bg-emerald-500/10" 
-          : `text-white/40 ${color ? colorHover[color] : "hover:text-white/80 hover:bg-white/[0.05]"}`
+          : `text-white/40 ${color ? colorHover[color] : "hover:text-white/80 hover:bg-white/5"}`
       }`}
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
@@ -1345,7 +1515,7 @@ function AccountMenuItem({ icon, label, shortcut, connected, onClick }) {
   return (
     <button 
       onClick={onClick}
-      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[12px] font-medium text-white/60 hover:text-white hover:bg-white/[0.05] transition-all group"
+      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[12px] font-medium text-white/60 hover:text-white hover:bg-white/5 transition-all group"
     >
       <span className="text-white/40 group-hover:text-white/70">{icon}</span>
       <span className="flex-1 text-left">{label}</span>
@@ -1370,7 +1540,7 @@ function NotificationItem({ icon, title, time, color = "neutral" }) {
 
   return (
     <motion.div 
-      className="px-2 py-2 mx-1 my-0.5 rounded-lg hover:bg-white/[0.04] cursor-pointer transition-all flex items-start gap-2.5"
+      className="px-2 py-2 mx-1 my-0.5 rounded-lg hover:bg-white/4 cursor-pointer transition-all flex items-start gap-2.5"
       whileHover={{ x: 2 }}
     >
       <div className={`p-2 rounded-lg ${colorClasses[color]}`}>
@@ -1394,7 +1564,7 @@ function ParticipantsOverflowTile({ hiddenParticipants, hiddenCount, onSelectPar
         initial={{ opacity: 0, scale: 0.8 }} 
         animate={{ opacity: 1, scale: 1 }} 
         onClick={() => setShowPopup(!showPopup)}
-        className="relative h-full rounded-2xl overflow-hidden bg-gradient-to-br from-[#1f1f24] to-[#16161a] flex items-center justify-center cursor-pointer hover:from-[#252530] hover:to-[#1a1a1f] transition-all border border-white/5 hover:border-white/10 group"
+        className="relative h-full rounded-2xl overflow-hidden bg-linear-to-br from-[#1f1f24] to-[#16161a] flex items-center justify-center cursor-pointer hover:from-[#252530] hover:to-[#1a1a1f] transition-all border border-white/5 hover:border-white/10 group"
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
       >
@@ -1442,7 +1612,7 @@ function ParticipantsOverflowTile({ hiddenParticipants, hiddenCount, onSelectPar
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm"
+              className="fixed inset-0 z-100 bg-black/60 backdrop-blur-sm"
               onClick={() => setShowPopup(false)}
             />
             
@@ -1452,11 +1622,11 @@ function ParticipantsOverflowTile({ hiddenParticipants, hiddenCount, onSelectPar
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -50 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="fixed top-6 left-1/2 -translate-x-1/2 z-[101] w-[90vw] max-w-3xl"
+              className="fixed top-6 left-1/2 -translate-x-1/2 z-101 w-[90vw] max-w-3xl"
             >
               <div className="bg-[#0f0f12] border border-white/10 rounded-3xl shadow-2xl shadow-black/70 overflow-hidden">
                 {/* Header */}
-                <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-gradient-to-r from-[#1a1a1f] to-[#131316]">
+                <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-linear-to-r from-[#1a1a1f] to-[#131316]">
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
                       <svg className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1496,7 +1666,7 @@ function ParticipantsOverflowTile({ hiddenParticipants, hiddenCount, onSelectPar
                           onSelectParticipant(p);
                           setShowPopup(false);
                         }}
-                        className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-[#1f1f24] to-[#16161a] cursor-pointer group border border-white/5 hover:border-emerald-500/30 transition-all"
+                        className="relative rounded-2xl overflow-hidden bg-linear-to-br from-[#1f1f24] to-[#16161a] cursor-pointer group border border-white/5 hover:border-emerald-500/30 transition-all"
                         style={{ aspectRatio: '4/3' }}
                         whileHover={{ scale: 1.03 }}
                         whileTap={{ scale: 0.98 }}
@@ -1541,7 +1711,7 @@ function ParticipantsOverflowTile({ hiddenParticipants, hiddenCount, onSelectPar
                         </div>
 
                         {/* Name & badges */}
-                        <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 via-black/40 to-transparent">
+                        <div className="absolute bottom-0 left-0 right-0 p-3 bg-linear-to-t from-black/80 via-black/40 to-transparent">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <span className="text-sm font-medium text-white truncate">{p.name.split(' ')[0]}</span>
