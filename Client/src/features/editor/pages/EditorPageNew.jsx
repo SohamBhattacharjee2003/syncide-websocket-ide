@@ -191,14 +191,23 @@ export default function EditorPage() {
       const sorted = host ? [host, ...others] : [...others];
       setParticipants(sorted);
     });
-    // Auto-join the video call
-    joinCall();
     return () => {
       socket.off("room-users");
       leaveCall();
       stopMedia();
     };
   }, [normalizedRoomId, userName]);
+
+  // ★ Join video call ONLY after localStream is ready (mic auto-acquired)
+  // This ensures peer connections always have audio tracks from the start.
+  const hasJoinedCallRef = useRef(false);
+  useEffect(() => {
+    if (localStream && userName && !hasJoinedCallRef.current) {
+      hasJoinedCallRef.current = true;
+      joinCall();
+      console.log("[EditorPage] joined video call with localStream ready");
+    }
+  }, [localStream, userName, joinCall]);
 
   // Auto-scroll terminal
   useEffect(() => {
@@ -1342,15 +1351,9 @@ export default function EditorPage() {
       </div>
 
       {/* ══════════════════════ REMOTE AUDIO PLAYBACK ══════════════════════ */}
-      {/* Hidden audio elements that play remote peers' audio streams */}
+      {/* Dedicated components that reliably attach remote audio streams */}
       {Array.from(remoteStreams.entries()).map(([peerId, { stream }]) => (
-        <audio
-          key={`audio-${peerId}`}
-          autoPlay
-          playsInline
-          ref={(el) => { if (el && stream) el.srcObject = stream; }}
-          style={{ display: "none" }}
-        />
+        <RemoteAudio key={`audio-${peerId}`} stream={stream} peerId={peerId} />
       ))}
 
       {/* ══════════════════════ TOAST NOTIFICATION ══════════════════════ */}
@@ -1771,4 +1774,75 @@ function ParticipantsOverflowTile({ hiddenParticipants, hiddenCount, onSelectPar
       </AnimatePresence>
     </div>
   );
+}
+
+/**
+ * RemoteAudio — plays a remote peer's audio using BOTH Web Audio API
+ * and a standard <audio> element for maximum compatibility.
+ */
+function RemoteAudio({ stream, peerId }) {
+  const audioRef = useRef(null);
+  const ctxRef = useRef(null);
+  const sourceRef = useRef(null);
+
+  useEffect(() => {
+    if (!stream) return;
+
+    const audioTracks = stream.getAudioTracks();
+    console.log(`[RemoteAudio] ${peerId}: ${audioTracks.length} audio tracks, enabled=${audioTracks[0]?.enabled}, state=${audioTracks[0]?.readyState}`);
+
+    // ---- Method 1: Web Audio API (most reliable) ----
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      // Resume context (required after user interaction)
+      if (ctx.state === "suspended") {
+        ctx.resume();
+        const resumeOnClick = () => { ctx.resume(); document.removeEventListener("click", resumeOnClick); };
+        document.addEventListener("click", resumeOnClick);
+      }
+      const source = ctx.createMediaStreamSource(stream);
+      // Connect directly to speakers
+      source.connect(ctx.destination);
+      ctxRef.current = ctx;
+      sourceRef.current = source;
+      console.log(`[RemoteAudio] ${peerId}: Web Audio API connected, ctx.state=${ctx.state}`);
+
+      // Monitor audio levels (debug)
+      const analyser = ctx.createAnalyser();
+      source.connect(analyser);
+      analyser.fftSize = 256;
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      let loggedActive = false;
+      const checkLevel = setInterval(() => {
+        analyser.getByteFrequencyData(dataArray);
+        const maxLevel = Math.max(...dataArray);
+        if (maxLevel > 10 && !loggedActive) {
+          console.log(`[RemoteAudio] ${peerId}: ✅ AUDIO DATA DETECTED! level=${maxLevel}`);
+          loggedActive = true;
+        }
+      }, 500);
+
+      return () => {
+        clearInterval(checkLevel);
+        source.disconnect();
+        ctx.close();
+      };
+    } catch (err) {
+      console.warn(`[RemoteAudio] ${peerId}: Web Audio API failed, falling back to <audio>`, err);
+    }
+
+    // ---- Method 2: <audio> element fallback ----
+    const el = audioRef.current;
+    if (el) {
+      el.srcObject = stream;
+      el.play().catch(() => {
+        const resume = () => { el.play().catch(() => {}); };
+        document.addEventListener("click", resume, { once: true });
+      });
+    }
+
+    return () => { if (audioRef.current) audioRef.current.srcObject = null; };
+  }, [stream, peerId]);
+
+  return <audio ref={audioRef} autoPlay playsInline style={{ display: "none" }} />;
 }

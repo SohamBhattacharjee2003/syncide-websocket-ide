@@ -2,6 +2,8 @@ const Room = require("../models/Room");
 
 // Track participants in memory (for demo; use DB for production)
 const roomParticipants = {};
+// Track host by username per room (persists across reloads)
+const roomHosts = {};
 
 function setupSocket(io) {
   io.on("connection", (socket) => {
@@ -75,11 +77,13 @@ function setupSocket(io) {
       const socketsInRoom = io.sockets.adapter.rooms.get(roomId) || new Set();
       roomParticipants[roomId] = roomParticipants[roomId].filter((u) => socketsInRoom.has(u.id));
 
-      // Assign host
-      const socketsInRoomArr = Array.from(io.sockets.adapter.rooms.get(roomId) || []);
-      const hostSocketId = socketsInRoomArr[0];
+      // Assign host — persist by username so reloads don't change host
+      if (!roomHosts[roomId] || !roomParticipants[roomId].some((u) => u.name === roomHosts[roomId])) {
+        // No host set, or current host left — assign to this user
+        roomHosts[roomId] = userName;
+      }
       roomParticipants[roomId] = roomParticipants[roomId].map((u) =>
-        u.id === hostSocketId
+        u.name === roomHosts[roomId]
           ? { ...u, isHost: true, color: "#f59e0b" }
           : { ...u, isHost: false, color: "#10b981" }
       );
@@ -176,18 +180,16 @@ function setupSocket(io) {
         const socketsInRoom = io.sockets.adapter.rooms.get(roomId) || new Set();
         roomParticipants[roomId] = roomParticipants[roomId].filter((u) => socketsInRoom.has(u.id));
 
-        const socketsInRoomArr = Array.from(io.sockets.adapter.rooms.get(roomId) || []);
-        const hostSocketId = socketsInRoomArr[0];
+        // Reassign host if the current host left
+        if (roomHosts[roomId] && !roomParticipants[roomId].some((u) => u.name === roomHosts[roomId])) {
+          roomHosts[roomId] = roomParticipants[roomId][0]?.name || null;
+        }
         roomParticipants[roomId] = roomParticipants[roomId].map((u) =>
-          u.id === hostSocketId
+          u.name === roomHosts[roomId]
             ? { ...u, isHost: true, color: "#f59e0b" }
             : { ...u, isHost: false, color: "#10b981" }
         );
         io.to(roomId).emit("room-users", roomParticipants[roomId]);
-
-        const socketsInRoomDebug = Array.from(io.sockets.adapter.rooms.get(roomId) || []);
-        console.log(`[LEAVE] Sockets in room ${roomId}:`, socketsInRoomDebug);
-        console.log(`[LEAVE] Participants in room ${roomId}:`, roomParticipants[roomId]);
       }
       socket.to(roomId).emit("user-left", { peerId: socket.id });
       console.log(`User ${socket.id} left room ${roomId}`);
@@ -201,8 +203,14 @@ function setupSocket(io) {
           roomParticipants[roomId] = roomParticipants[roomId].filter((u) => u.id !== socket.id);
           const socketsInRoom = io.sockets.adapter.rooms.get(roomId) || new Set();
           roomParticipants[roomId] = roomParticipants[roomId].filter((u) => socketsInRoom.has(u.id));
-          roomParticipants[roomId] = roomParticipants[roomId].map((u, idx) =>
-            idx === 0 ? { ...u, isHost: true, color: "#f59e0b" } : { ...u, isHost: false, color: "#10b981" }
+          // Reassign host if the current host disconnected
+          if (roomHosts[roomId] && !roomParticipants[roomId].some((u) => u.name === roomHosts[roomId])) {
+            roomHosts[roomId] = roomParticipants[roomId][0]?.name || null;
+          }
+          roomParticipants[roomId] = roomParticipants[roomId].map((u) =>
+            u.name === roomHosts[roomId]
+              ? { ...u, isHost: true, color: "#f59e0b" }
+              : { ...u, isHost: false, color: "#10b981" }
           );
           io.to(roomId).emit("room-users", roomParticipants[roomId]);
 

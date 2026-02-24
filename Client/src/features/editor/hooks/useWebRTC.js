@@ -8,11 +8,10 @@ const ICE_SERVERS = {
 };
 
 /**
- * useWebRTC — manages peer-to-peer connections for audio/video/screen.
+ * useWebRTC — peer connections for audio/video.
  *
- * Key fix: when localStream changes (mic/camera toggled after connection),
- * we add tracks AND trigger renegotiation (new offer/answer) so the remote
- * peer starts receiving audio/video.
+ * Expects localStream to already have an audio track when joinCall runs
+ * (useMediaStream auto-acquires mic). This avoids SDP m-line issues.
  */
 export default function useWebRTC(socket, roomId, userName, localStream, screenStream) {
   const [remoteStreams, setRemoteStreams] = useState(new Map());
@@ -21,80 +20,58 @@ export default function useWebRTC(socket, roomId, userName, localStream, screenS
   const localStreamRef = useRef(localStream);
   const screenStreamRef = useRef(screenStream);
 
-  // Keep refs in sync so closures always see latest stream
   useEffect(() => { localStreamRef.current = localStream; }, [localStream]);
   useEffect(() => { screenStreamRef.current = screenStream; }, [screenStream]);
 
-  // ---------- Renegotiate with a peer ----------
-  const renegotiate = useCallback(async (peerId) => {
-    const pc = peersRef.current.get(peerId);
-    if (!pc || !socket) return;
-    try {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socket.emit("video-offer", { roomId, offer, to: peerId });
-    } catch (err) {
-      console.error("[useWebRTC] renegotiate error:", err);
-    }
-  }, [socket, roomId]);
-
-  // ---------- Create peer connection ----------
+  // ---------- create peer ----------
   const createPeerConnection = useCallback((peerId) => {
     if (peersRef.current.has(peerId)) return peersRef.current.get(peerId);
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
 
-    // Add current local tracks
+    // Add local tracks (localStream should already exist with audio)
     const stream = localStreamRef.current;
     if (stream) {
       stream.getTracks().forEach((track) => {
         pc.addTrack(track, stream);
+        console.log(`[WebRTC] addTrack ${track.kind} for ${peerId}`);
       });
+    } else {
+      console.warn("[WebRTC] no localStream when creating peer — audio may not work!");
     }
 
-    // Add screen share track if active
+    // Screen share
     const screen = screenStreamRef.current;
     if (screen) {
-      screen.getTracks().forEach((track) => {
-        pc.addTrack(track, screen);
-      });
+      screen.getTracks().forEach((t) => pc.addTrack(t, screen));
     }
 
-    // Send ICE candidates
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit("ice-candidate", { roomId, candidate: event.candidate, to: peerId });
+    // ICE
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        socket.emit("ice-candidate", { roomId, candidate: e.candidate, to: peerId });
       }
     };
 
     // Receive remote tracks
     pc.ontrack = (event) => {
-      const [remoteStream] = event.streams;
-      if (remoteStream) {
-        setRemoteStreams((prev) => {
-          const next = new Map(prev);
-          next.set(peerId, { stream: remoteStream, userName: peerId });
-          return next;
-        });
+      console.log(`[WebRTC] ontrack ${event.track.kind} from ${peerId}`);
+      const remoteStream = event.streams?.[0] || new MediaStream();
+      if (!remoteStream.getTrackById(event.track.id)) {
+        remoteStream.addTrack(event.track);
       }
+      setRemoteStreams((prev) => {
+        const next = new Map(prev);
+        next.set(peerId, { stream: remoteStream, userName: peerId });
+        return next;
+      });
     };
 
-    // Handle negotiationneeded (fired when addTrack happens after connection)
-    pc.onnegotiationneeded = async () => {
-      // Only the offerer should renegotiate
-      if (pc.signalingState === "stable") {
-        try {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          socket.emit("video-offer", { roomId, offer, to: peerId });
-        } catch (err) {
-          console.error("[useWebRTC] onnegotiationneeded error:", err);
-        }
-      }
-    };
+    // No onnegotiationneeded — we only negotiate explicitly
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
+      console.log(`[WebRTC] ${peerId} → ${pc.connectionState}`);
+      if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
         removePeer(peerId);
       }
     };
@@ -103,13 +80,12 @@ export default function useWebRTC(socket, roomId, userName, localStream, screenS
     return pc;
   }, [socket, roomId]);
 
-  // ---------- Remove peer ----------
+  // ---------- remove peer ----------
   const removePeer = useCallback((peerId) => {
     const pc = peersRef.current.get(peerId);
     if (pc) {
       pc.ontrack = null;
       pc.onicecandidate = null;
-      pc.onnegotiationneeded = null;
       pc.onconnectionstatechange = null;
       pc.close();
       peersRef.current.delete(peerId);
@@ -121,55 +97,45 @@ export default function useWebRTC(socket, roomId, userName, localStream, screenS
     });
   }, []);
 
-  // ---------- Join / Leave ----------
+  // ---------- join / leave ----------
   const joinCall = useCallback(() => {
     if (!socket || !roomId) return;
     inCallRef.current = true;
     socket.emit("join-video-call", { roomId, userName });
+    console.log("[WebRTC] joinCall →", roomId);
   }, [socket, roomId, userName]);
 
   const leaveCall = useCallback(() => {
     inCallRef.current = false;
-    if (socket && roomId) {
-      socket.emit("leave-video-call", { roomId, userName });
-    }
-    peersRef.current.forEach((pc) => {
-      pc.ontrack = null;
-      pc.onicecandidate = null;
-      pc.onnegotiationneeded = null;
-      pc.close();
-    });
+    if (socket && roomId) socket.emit("leave-video-call", { roomId, userName });
+    peersRef.current.forEach((pc) => { pc.close(); });
     peersRef.current.clear();
     setRemoteStreams(new Map());
   }, [socket, roomId, userName]);
 
-  // ---------- Socket signaling handlers ----------
+  // ---------- signaling ----------
   useEffect(() => {
     if (!socket) return;
 
     const handleUserJoined = async ({ peerId }) => {
       if (!inCallRef.current) return;
+      console.log(`[WebRTC] peer joined → ${peerId}, creating offer`);
       const pc = createPeerConnection(peerId);
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         socket.emit("video-offer", { roomId, offer, to: peerId });
-      } catch (err) {
-        console.error("[useWebRTC] createOffer error:", err);
-      }
+      } catch (e) { console.error("[WebRTC] offer error:", e); }
     };
 
     const handleOffer = async ({ offer, from }) => {
-      if (!inCallRef.current) {
-        inCallRef.current = true;
-      }
+      console.log(`[WebRTC] got offer from ${from}`);
+      if (!inCallRef.current) inCallRef.current = true;
       let pc = peersRef.current.get(from);
-      if (!pc) {
-        pc = createPeerConnection(from);
-      }
+      if (!pc) pc = createPeerConnection(from);
       try {
-        // Handle glare (both sides send offer simultaneously)
         if (pc.signalingState !== "stable") {
+          // Glare: both sides sent offers; one side must rollback
           await Promise.all([
             pc.setLocalDescription({ type: "rollback" }),
             pc.setRemoteDescription(new RTCSessionDescription(offer)),
@@ -180,86 +146,75 @@ export default function useWebRTC(socket, roomId, userName, localStream, screenS
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit("video-answer", { roomId, answer, to: from });
-      } catch (err) {
-        console.error("[useWebRTC] handleOffer error:", err);
-      }
+      } catch (e) { console.error("[WebRTC] handle-offer error:", e); }
     };
 
     const handleAnswer = async ({ answer, from }) => {
       const pc = peersRef.current.get(from);
-      if (pc && pc.signalingState === "have-local-offer") {
+      if (pc?.signalingState === "have-local-offer") {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(answer));
-        } catch (err) {
-          console.error("[useWebRTC] handleAnswer error:", err);
-        }
+          console.log(`[WebRTC] answer set for ${from}`);
+        } catch (e) { console.error("[WebRTC] answer error:", e); }
       }
     };
 
-    const handleIceCandidate = async ({ candidate, from }) => {
+    const handleIce = async ({ candidate, from }) => {
       const pc = peersRef.current.get(from);
       if (pc) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (err) {
-          console.error("[useWebRTC] addIceCandidate error:", err);
-        }
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
+        catch (e) { /* ignore late candidates */ }
       }
     };
 
-    const handleUserLeft = ({ peerId }) => {
-      removePeer(peerId);
-    };
+    const handleLeft = ({ peerId }) => removePeer(peerId);
 
     socket.on("user-joined-video", handleUserJoined);
     socket.on("video-offer", handleOffer);
     socket.on("video-answer", handleAnswer);
-    socket.on("ice-candidate", handleIceCandidate);
-    socket.on("user-left-video", handleUserLeft);
+    socket.on("ice-candidate", handleIce);
+    socket.on("user-left-video", handleLeft);
 
     return () => {
       socket.off("user-joined-video", handleUserJoined);
       socket.off("video-offer", handleOffer);
       socket.off("video-answer", handleAnswer);
-      socket.off("ice-candidate", handleIceCandidate);
-      socket.off("user-left-video", handleUserLeft);
+      socket.off("ice-candidate", handleIce);
+      socket.off("user-left-video", handleLeft);
     };
   }, [socket, roomId, createPeerConnection, removePeer]);
 
-  // ---------- Track management: when localStream changes ----------
+  // ---------- track sync ----------
+  // When localStream changes (e.g. camera toggled → new getUserMedia stream),
+  // replace tracks on existing senders.
   useEffect(() => {
     if (!localStream) return;
     peersRef.current.forEach((pc, peerId) => {
       const senders = pc.getSenders();
       localStream.getTracks().forEach((track) => {
-        const existingSender = senders.find((s) => s.track?.kind === track.kind);
-        if (existingSender) {
-          existingSender.replaceTrack(track);
-        } else {
-          // Adding a new track triggers onnegotiationneeded automatically
-          pc.addTrack(track, localStream);
+        const sender = senders.find((s) => s.track?.kind === track.kind);
+        if (sender) {
+          console.log(`[WebRTC] replaceTrack ${track.kind} for ${peerId}`);
+          sender.replaceTrack(track);
         }
+        // If no sender for this kind, we'd need addTrack + renegotiation.
+        // But since we auto-acquire mic, audio sender always exists.
       });
     });
   }, [localStream]);
 
-  // ---------- Track management: when screenStream changes ----------
+  // Screen share: replace video track
   useEffect(() => {
     peersRef.current.forEach((pc) => {
-      const senders = pc.getSenders();
-      if (screenStream) {
-        const screenTrack = screenStream.getVideoTracks()[0];
-        if (screenTrack) {
-          const videoSenders = senders.filter((s) => s.track?.kind === "video");
-          if (videoSenders.length > 1) {
-            videoSenders[1].replaceTrack(screenTrack);
-          } else {
-            pc.addTrack(screenTrack, screenStream);
-          }
-        }
+      const videoSender = pc.getSenders().find((s) => s.track?.kind === "video");
+      if (screenStream && videoSender) {
+        const st = screenStream.getVideoTracks()[0];
+        if (st) videoSender.replaceTrack(st);
+      } else if (!screenStream && videoSender) {
+        const cam = localStreamRef.current?.getVideoTracks()[0] || null;
+        videoSender.replaceTrack(cam);
       }
     });
-
     if (screenStream && socket && roomId) {
       socket.emit("screen-share-started", { roomId, userName });
     } else if (!screenStream && socket && roomId && inCallRef.current) {
@@ -267,9 +222,5 @@ export default function useWebRTC(socket, roomId, userName, localStream, screenS
     }
   }, [screenStream, socket, roomId, userName]);
 
-  return {
-    remoteStreams,
-    joinCall,
-    leaveCall,
-  };
+  return { remoteStreams, joinCall, leaveCall };
 }

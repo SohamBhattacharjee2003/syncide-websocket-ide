@@ -3,13 +3,8 @@ import { useState, useRef, useCallback, useEffect } from "react";
 /**
  * useMediaStream — manages local mic, camera, and screen sharing streams.
  *
- * Returns:
- *  - localStream         (MediaStream | null)
- *  - screenStream        (MediaStream | null)
- *  - localVideoRef       (ref to attach to a <video> element)
- *  - isMicOn / isCameraOn / isScreenSharing (booleans)
- *  - toggleMic / toggleCamera / toggleScreenShare (functions)
- *  - stopAll             (cleanup function)
+ * KEY: Auto-acquires a MUTED audio stream on mount so that WebRTC peer
+ * connections always have a real audio track from the start.
  */
 export default function useMediaStream() {
   const [localStream, setLocalStream] = useState(null);
@@ -19,10 +14,36 @@ export default function useMediaStream() {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const localVideoRef = useRef(null);
 
-  // Start mic + camera
+  // ★ Auto-acquire mic on mount (muted) so WebRTC always has an audio track
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: false,
+        });
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        // Start muted — user clicks mic button to unmute
+        stream.getAudioTracks().forEach((t) => (t.enabled = false));
+        setLocalStream(stream);
+        setIsMicOn(false);
+        console.log("[useMediaStream] auto-acquired muted mic stream");
+      } catch (err) {
+        console.warn("[useMediaStream] could not auto-acquire mic:", err.message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Start mic + camera (used when toggling camera ON or replacing stream)
   const startMedia = useCallback(async ({ audio = true, video = true } = {}) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio, video });
+      // Stop old tracks before replacing
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop());
+      }
       setLocalStream(stream);
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
@@ -34,18 +55,16 @@ export default function useMediaStream() {
       console.error("[useMediaStream] getUserMedia failed:", err);
       return null;
     }
-  }, []);
+  }, [localStream]);
 
-  // Toggle microphone
+  // Toggle microphone — just flips track.enabled (no new stream needed)
   const toggleMic = useCallback(() => {
     if (!localStream) {
-      // Start with mic only
       startMedia({ audio: true, video: isCameraOn });
       return;
     }
     const audioTracks = localStream.getAudioTracks();
     if (audioTracks.length === 0) {
-      // No audio track yet — restart with audio
       startMedia({ audio: true, video: isCameraOn });
       return;
     }
@@ -62,6 +81,7 @@ export default function useMediaStream() {
     }
     const videoTracks = localStream.getVideoTracks();
     if (videoTracks.length === 0) {
+      // Need to get a new stream with video
       startMedia({ audio: isMicOn, video: true });
       return;
     }
@@ -83,7 +103,6 @@ export default function useMediaStream() {
         video: { cursor: "always" },
         audio: false,
       });
-      // When user clicks browser's "stop sharing" button
       stream.getVideoTracks()[0].addEventListener("ended", () => {
         setScreenStream(null);
         setIsScreenSharing(false);
@@ -97,7 +116,7 @@ export default function useMediaStream() {
     }
   }, [isScreenSharing, screenStream]);
 
-  // Cleanup on unmount
+  // Cleanup
   const stopAll = useCallback(() => {
     if (localStream) {
       localStream.getTracks().forEach((t) => t.stop());
@@ -113,10 +132,7 @@ export default function useMediaStream() {
   }, [localStream, screenStream]);
 
   useEffect(() => {
-    return () => {
-      // Cleanup on unmount
-      stopAll();
-    };
+    return () => stopAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
