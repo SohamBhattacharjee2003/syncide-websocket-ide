@@ -453,8 +453,8 @@ export default function EditorPage() {
         );
       }
     } catch (err) {
-      setTerminalOutput(prev => 
-        `${prev}❌ Failed to execute: ${err.message}\n\nMake sure the backend server is running on http://localhost:5000\n\n$ `
+      setTerminalOutput(prev =>
+        `${prev}❌ Failed to execute: ${err.message}\n\nMake sure the backend server is running\n\n$ `
       );
     } finally {
       setIsExecuting(false);

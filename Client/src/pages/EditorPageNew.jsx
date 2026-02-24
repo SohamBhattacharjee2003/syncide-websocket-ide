@@ -255,7 +255,7 @@ export default function EditorPage() {
     );
     
     try {
-      const response = await fetch("http://localhost:5000/execute", {
+      const response = await fetch(`${import.meta.env.VITE_SOCKET_URL || "http://localhost:5000"}/execute`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -281,7 +281,7 @@ export default function EditorPage() {
       }
     } catch (err) {
       setTerminalOutput(prev => 
-        `${prev}❌ Failed to execute: ${err.message}\n\nMake sure the backend server is running on http://localhost:5000\n\n$ `
+        `${prev}❌ Failed to execute: ${err.message}\n\nMake sure the backend server is running\n\n$ `
       );
     } finally {
       setIsExecuting(false);
