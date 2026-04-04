@@ -204,7 +204,7 @@ export default function useWebRTC({ socket, roomId, userName, localStream }) {
 
     const handleUserJoined = ({ peerId, userName }) => {
       console.log(`[WebRTC] User joined: ${peerId} (${userName})`);
-      createPeerConnection(peerId, false); // existing peer -> impolite
+      const pc = createPeerConnection(peerId, false); // existing peer -> impolite
       
       // Store the userName with the peer's data
       setRemoteStreams(prev => {
@@ -214,8 +214,23 @@ export default function useWebRTC({ socket, roomId, userName, localStream }) {
         return m;
       });
 
-      // Broadcast current media status to the new joiner
+      // CRITICAL: Add local tracks immediately if available
       const currentStream = localStreamRef.current;
+      if (currentStream) {
+        const audioTrack = currentStream.getAudioTracks()[0];
+        const videoTrack = currentStream.getVideoTracks()[0];
+        
+        console.log(`[WebRTC] Adding tracks for new joiner ${peerId}: audio=${!!audioTrack}, video=${!!videoTrack}`);
+        
+        if (audioTrack) {
+          pc.addTrack(audioTrack, currentStream);
+        }
+        if (videoTrack) {
+          pc.addTrack(videoTrack, currentStream);
+        }
+      }
+
+      // Broadcast current media status to the new joiner
       const currentMic = currentStream?.getAudioTracks().some(t => t.enabled && t.readyState === 'live') ?? false;
       const currentCam = currentStream?.getVideoTracks().some(t => t.enabled && t.readyState === 'live') ?? false;
       socket.emit("media-status-changed", { roomId, isMicOn: currentMic, isCameraOn: currentCam });
@@ -225,7 +240,7 @@ export default function useWebRTC({ socket, roomId, userName, localStream }) {
       console.log(`[WebRTC] Received existing peers:`, peers);
       peers.forEach(({ peerId, userName }) => {
         console.log(`[WebRTC] Creating connection for existing peer: ${peerId} (${userName})`);
-        createPeerConnection(peerId, true); // joiner -> polite
+        const pc = createPeerConnection(peerId, true); // joiner -> polite
         
         // Store the userName with the peer's data (polite side)
         setRemoteStreams(prev => {
@@ -236,6 +251,22 @@ export default function useWebRTC({ socket, roomId, userName, localStream }) {
           console.log(`[WebRTC] Stored peer info for ${peerId}:`, updatedInfo);
           return m;
         });
+        
+        // CRITICAL: Add local tracks immediately for existing peers
+        const currentStream = localStreamRef.current;
+        if (currentStream) {
+          const audioTrack = currentStream.getAudioTracks()[0];
+          const videoTrack = currentStream.getVideoTracks()[0];
+          
+          console.log(`[WebRTC] Adding tracks for existing peer ${peerId}: audio=${!!audioTrack}, video=${!!videoTrack}`);
+          
+          if (audioTrack) {
+            pc.addTrack(audioTrack, currentStream);
+          }
+          if (videoTrack) {
+            pc.addTrack(videoTrack, currentStream);
+          }
+        }
       });
     };
 
