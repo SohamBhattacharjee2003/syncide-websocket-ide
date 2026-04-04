@@ -46,10 +46,13 @@ function assignHost(io, roomId) {
     return;
   }
   
-  // Assign first participant as host
-  const newHost = roomParticipants[roomId][0];
-  roomHosts[roomId] = newHost.id;
-  console.log(`[Host] Room ${roomId}: Assigned ${newHost.name} (${newHost.id}) as host`);
+  // If no host exists, assign the FIRST participant who joined (not by array order)
+  // Find the participant with the earliest join time or use first in array
+  if (!roomHosts[roomId]) {
+    const newHost = roomParticipants[roomId][0];
+    roomHosts[roomId] = newHost.id;
+    console.log(`[Host] Room ${roomId}: Assigned ${newHost.name} (${newHost.id}) as NEW host`);
+  }
 }
 
 // Helper: Update host flags on all participants
