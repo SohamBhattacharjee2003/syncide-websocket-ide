@@ -146,6 +146,12 @@ function setupSocket(io) {
       broadcastParticipants(io, normalizedRoomId);
 
       console.log(`[Join] Room ${normalizedRoomId} now has ${roomParticipants[normalizedRoomId].length} participants`);
+      
+      // Auto-join video call after a short delay
+      setTimeout(() => {
+        console.log(`[Auto-Join] Triggering auto video call join for ${userName} (${socket.id})`);
+        socket.emit("auto-join-video-call", { roomId: normalizedRoomId, userName });
+      }, 2000);
     });
 
     // ── CODE SYNC ────────────────────────────────────────────────────────────

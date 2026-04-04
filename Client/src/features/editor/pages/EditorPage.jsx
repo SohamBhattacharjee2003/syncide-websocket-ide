@@ -258,49 +258,11 @@ export default function EditorPage() {
     cleanup: cleanupWebRTC,
   } = useWebRTC({ socket, roomId, userName, localStream });
 
-  // Auto-start video call when user joins room
-  useEffect(() => {
-    console.log('[EditorPage] Auto-join effect triggered, userName:', userName, 'isInCall:', isInCall);
-    
-    if (userName && !isInCall) {
-      const autoJoinCall = async () => {
-        try {
-          console.log('[EditorPage] ===== Starting auto-join sequence =====');
-          
-          // First enable camera and mic and WAIT for them
-          console.log('[EditorPage] Step 1: Enabling camera...');
-          await toggleCamera();
-          console.log('[EditorPage] Step 1: Camera enabled');
-          
-          console.log('[EditorPage] Step 2: Enabling mic...');
-          await toggleMic();
-          console.log('[EditorPage] Step 2: Mic enabled');
-          
-          // Wait a bit longer to ensure localStream is fully updated
-          console.log('[EditorPage] Step 3: Waiting for stream to stabilize...');
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          console.log('[EditorPage] Step 4: Joining video call...');
-          joinCall();
-          setIsInCall(true);
-          setIsVideoPanelOpen(true);
-          console.log('[EditorPage] ===== Auto-joined video call successfully =====');
-        } catch (error) {
-          console.error('[EditorPage] ===== Failed to auto-join =====', error);
-        }
-      };
-      
-      // Only auto-join once, 1.5 seconds after username is set
-      console.log('[EditorPage] Scheduling auto-join in 1.5 seconds...');
-      const timer = setTimeout(autoJoinCall, 1500);
-      return () => {
-        console.log('[EditorPage] Cleaning up auto-join timer');
-        clearTimeout(timer);
-      };
-    } else {
-      console.log('[EditorPage] Skipping auto-join: userName=', userName, 'isInCall=', isInCall);
-    }
-  }, [userName]); // Only depend on userName, not isInCall
+  // Auto-start video call when user joins room - DISABLED, now triggered by backend
+  // useEffect(() => {
+  //   console.log('[EditorPage] Auto-join effect triggered, userName:', userName, 'isInCall:', isInCall);
+  //   ...
+  // }, [userName]);
 
   // Cleanup on page unload/reload
   useEffect(() => {
@@ -331,6 +293,8 @@ export default function EditorPage() {
   // Socket connection
   useEffect(() => {
     if (!userName) return;
+    
+    console.log('[EditorPage] Setting up socket listeners for room:', roomId);
     socket.emit("join-room", roomId, userName);
 
     socket.on("code-update", (newCode) => {
@@ -340,7 +304,30 @@ export default function EditorPage() {
     });
 
     socket.on("room-users", (userList) => {
+      console.log('[EditorPage] Received room-users:', userList);
       setUsers(userList);
+    });
+    
+    // Listen for auto-join video call trigger from backend
+    socket.on("auto-join-video-call", ({ roomId: triggerRoomId, userName: triggerUserName }) => {
+      console.log('[EditorPage] Received auto-join-video-call trigger from backend');
+      if (!isInCall) {
+        console.log('[EditorPage] Triggering video call join...');
+        const autoJoin = async () => {
+          try {
+            await toggleCamera();
+            await toggleMic();
+            await new Promise(resolve => setTimeout(resolve, 500));
+            joinCall();
+            setIsInCall(true);
+            setIsVideoPanelOpen(true);
+            console.log('[EditorPage] Auto-joined via backend trigger');
+          } catch (error) {
+            console.error('[EditorPage] Auto-join failed:', error);
+          }
+        };
+        autoJoin();
+      }
     });
 
     socket.on("connect", () => setIsConnected(true));
@@ -350,6 +337,7 @@ export default function EditorPage() {
     return () => {
       socket.off("code-update");
       socket.off("room-users");
+      socket.off("auto-join-video-call");
       socket.off("connect");
       socket.off("disconnect");
       
@@ -362,7 +350,7 @@ export default function EditorPage() {
       // Leave room
       socket.emit("leave-room", roomId);
     };
-  }, [roomId, userName, isInCall, stopAll, cleanupWebRTC]);
+  }, [roomId, userName]);
 
   // Show join modal if username is missing
   const handleJoinModalClose = (name) => {
