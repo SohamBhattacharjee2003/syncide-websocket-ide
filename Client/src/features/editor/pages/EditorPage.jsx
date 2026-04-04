@@ -263,17 +263,23 @@ export default function EditorPage() {
     if (userName && !isInCall) {
       const autoJoinCall = async () => {
         try {
-          // First enable camera and mic
+          console.log('[EditorPage] Starting auto-join sequence');
+          
+          // First enable camera and mic and WAIT for them
+          console.log('[EditorPage] Enabling camera...');
           await toggleCamera();
+          
+          console.log('[EditorPage] Enabling mic...');
           await toggleMic();
           
-          // Small delay to ensure media is ready
-          setTimeout(() => {
-            joinCall();
-            setIsInCall(true);
-            setIsVideoPanelOpen(true);
-            console.log('[EditorPage] Auto-joined video call');
-          }, 500);
+          // Wait a bit longer to ensure localStream is fully updated
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          console.log('[EditorPage] Joining video call...');
+          joinCall();
+          setIsInCall(true);
+          setIsVideoPanelOpen(true);
+          console.log('[EditorPage] Auto-joined video call successfully');
         } catch (error) {
           console.error('[EditorPage] Failed to auto-join:', error);
         }

@@ -44,6 +44,10 @@ export default function VideoSidePanel({
     remoteStreams instanceof Map ? remoteStreams.entries() : Object.entries(remoteStreams)
   );
   
+  console.log('[VideoSidePanel] Remote streams:', remoteStreams);
+  console.log('[VideoSidePanel] Participants array:', participants);
+  console.log('[VideoSidePanel] Users from socket:', users);
+  
   const allParticipants = [
     { 
       id: "local", 
