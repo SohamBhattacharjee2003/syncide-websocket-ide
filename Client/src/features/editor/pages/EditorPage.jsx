@@ -260,34 +260,45 @@ export default function EditorPage() {
 
   // Auto-start video call when user joins room
   useEffect(() => {
+    console.log('[EditorPage] Auto-join effect triggered, userName:', userName, 'isInCall:', isInCall);
+    
     if (userName && !isInCall) {
       const autoJoinCall = async () => {
         try {
-          console.log('[EditorPage] Starting auto-join sequence');
+          console.log('[EditorPage] ===== Starting auto-join sequence =====');
           
           // First enable camera and mic and WAIT for them
-          console.log('[EditorPage] Enabling camera...');
+          console.log('[EditorPage] Step 1: Enabling camera...');
           await toggleCamera();
+          console.log('[EditorPage] Step 1: Camera enabled');
           
-          console.log('[EditorPage] Enabling mic...');
+          console.log('[EditorPage] Step 2: Enabling mic...');
           await toggleMic();
+          console.log('[EditorPage] Step 2: Mic enabled');
           
           // Wait a bit longer to ensure localStream is fully updated
+          console.log('[EditorPage] Step 3: Waiting for stream to stabilize...');
           await new Promise(resolve => setTimeout(resolve, 1000));
           
-          console.log('[EditorPage] Joining video call...');
+          console.log('[EditorPage] Step 4: Joining video call...');
           joinCall();
           setIsInCall(true);
           setIsVideoPanelOpen(true);
-          console.log('[EditorPage] Auto-joined video call successfully');
+          console.log('[EditorPage] ===== Auto-joined video call successfully =====');
         } catch (error) {
-          console.error('[EditorPage] Failed to auto-join:', error);
+          console.error('[EditorPage] ===== Failed to auto-join =====', error);
         }
       };
       
       // Only auto-join once, 1.5 seconds after username is set
+      console.log('[EditorPage] Scheduling auto-join in 1.5 seconds...');
       const timer = setTimeout(autoJoinCall, 1500);
-      return () => clearTimeout(timer);
+      return () => {
+        console.log('[EditorPage] Cleaning up auto-join timer');
+        clearTimeout(timer);
+      };
+    } else {
+      console.log('[EditorPage] Skipping auto-join: userName=', userName, 'isInCall=', isInCall);
     }
   }, [userName]); // Only depend on userName, not isInCall
 
