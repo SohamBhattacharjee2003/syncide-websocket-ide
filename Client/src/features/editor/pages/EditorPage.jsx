@@ -527,20 +527,33 @@ export default function EditorPage() {
       />
       
       {/* Development Mode: Loopback Toggle */}
-      {isDevelopmentMode && (
-        <div className="fixed bottom-4 left-4 z-50">
+      {isDevelopmentMode && isInCall && (
+        <div className="fixed top-20 left-4 z-50">
           <motion.button
-            onClick={() => setShowLoopback(!showLoopback)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            onClick={() => {
+              console.log('[Loopback] Toggling loopback mode:', !showLoopback);
+              setShowLoopback(!showLoopback);
+            }}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg ${
               showLoopback 
-                ? 'bg-emerald-500 text-white' 
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                ? 'bg-emerald-500 text-white ring-2 ring-emerald-400' 
+                : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
             }`}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
+            title="Toggle loopback mode for testing on same device"
           >
-            {showLoopback ? '🔄 Loopback ON' : '🔄 Loopback OFF'}
+            {showLoopback ? '🔄 Loopback ON' : '🔄 Enable Loopback'}
           </motion.button>
+          {showLoopback && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs text-emerald-400"
+            >
+              Test mode: Your video is mirrored
+            </motion.div>
+          )}
         </div>
       )}
 
