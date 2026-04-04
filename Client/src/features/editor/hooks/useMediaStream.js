@@ -46,12 +46,16 @@ export default function useMediaStream() {
   // ── Toggle microphone ──
   const toggleMic = useCallback(async () => {
     console.log("[useMediaStream.toggleMic] Called");
-    const stream = persistentStreamRef.current;
-    if (!stream) {
-      console.error("[useMediaStream] No stream available");
-      return;
+    
+    // Ensure stream exists
+    if (!persistentStreamRef.current) {
+      console.warn("[useMediaStream] Stream was null, creating new one");
+      const newStream = new MediaStream();
+      persistentStreamRef.current = newStream;
+      setLocalStream(newStream);
     }
-
+    
+    const stream = persistentStreamRef.current;
     const audioTracks = stream.getAudioTracks();
 
     if (audioTracks.length > 0) {
@@ -125,12 +129,16 @@ export default function useMediaStream() {
   // ── Toggle camera ──
   const toggleCamera = useCallback(async () => {
     console.log("[useMediaStream.toggleCamera] Called");
-    const stream = persistentStreamRef.current;
-    if (!stream) {
-      console.error("[useMediaStream] No stream available");
-      return;
+    
+    // Ensure stream exists
+    if (!persistentStreamRef.current) {
+      console.warn("[useMediaStream] Stream was null, creating new one");
+      const newStream = new MediaStream();
+      persistentStreamRef.current = newStream;
+      setLocalStream(newStream);
     }
-
+    
+    const stream = persistentStreamRef.current;
     const videoTracks = stream.getVideoTracks();
 
     if (videoTracks.length > 0) {
@@ -261,7 +269,10 @@ export default function useMediaStream() {
         t.stop();
         t.enabled = false;
       });
-      persistentStreamRef.current = new MediaStream(); // Reset to empty stream
+      // DON'T set to null - create a fresh empty stream instead
+      const newStream = new MediaStream();
+      persistentStreamRef.current = newStream;
+      setLocalStream(newStream);
     }
     
     // Stop screen share
@@ -270,15 +281,14 @@ export default function useMediaStream() {
         console.log(`[useMediaStream] Stopping screen track`);
         t.stop();
       });
+      setScreenStream(null);
     }
     
-    setLocalStream(new MediaStream());
-    setScreenStream(null);
     setIsMicOn(false);
     setIsCameraOn(false);
     setIsScreenSharing(false);
     
-    console.log("[useMediaStream] All tracks stopped");
+    console.log("[useMediaStream] All tracks stopped, stream reset to empty");
   }, [screenStream]);
 
   return {

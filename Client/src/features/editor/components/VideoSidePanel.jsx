@@ -222,26 +222,38 @@ export default function VideoSidePanel({
                 icon={isMicOn ? VscUnmute : VscMute}
                 active={isMicOn}
                 danger={!isMicOn}
-                onClick={onToggleMic}
+                onClick={() => {
+                  console.log('[VideoSidePanel] Mic button clicked, current state:', isMicOn);
+                  onToggleMic?.();
+                }}
                 tooltip={isMicOn ? "Mute" : "Unmute"}
               />
               <ControlButton
                 icon={isCameraOn ? HiOutlineVideoCamera : HiOutlineVideoCameraSlash}
                 active={isCameraOn}
                 danger={!isCameraOn}
-                onClick={onToggleCamera}
+                onClick={() => {
+                  console.log('[VideoSidePanel] Camera button clicked, current state:', isCameraOn);
+                  onToggleCamera?.();
+                }}
                 tooltip={isCameraOn ? "Stop" : "Start"}
               />
               <ControlButton
                 icon={HiOutlineComputerDesktop}
                 active={isScreenSharing}
-                onClick={isScreenSharing ? onStopScreenShare : onStartScreenShare}
+                onClick={() => {
+                  console.log('[VideoSidePanel] Screen share button clicked');
+                  (isScreenSharing ? onStopScreenShare : onStartScreenShare)?.();
+                }}
                 tooltip={isScreenSharing ? "Stop" : "Present"}
               />
               <ControlButton
                 icon={HiOutlinePhone}
                 danger={true}
-                onClick={onEndCall}
+                onClick={() => {
+                  console.log('[VideoSidePanel] End call button clicked');
+                  onEndCall?.();
+                }}
                 tooltip="Leave"
                 rotate={true}
               />
