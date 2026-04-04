@@ -231,7 +231,7 @@ export default function RightPanel({
       initial={{ x: 20, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       transition={{ delay: 0.1 }}
-      className="w-64 lg:w-72 bg-[#0a0a0a] border-l border-white/5 flex flex-col overflow-hidden"
+      className="w-56 lg:w-64 bg-[#0a0a0a] border-l border-white/5 flex flex-col overflow-hidden"
     >
       {/* Tabs */}
       <div className="flex border-b border-white/5">

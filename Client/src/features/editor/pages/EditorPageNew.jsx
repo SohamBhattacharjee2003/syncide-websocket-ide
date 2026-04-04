@@ -128,6 +128,36 @@ export default function EditorPage() {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const screenStreamRef = useRef(null);
   const mediaStreamRef = useRef(null);
+
+  // Utility function to completely stop all tracks in a stream
+  const stopAllTracksInStream = (stream, streamName = 'stream') => {
+    if (!stream) return;
+    
+    const tracks = stream.getTracks();
+    console.log(`[stopAllTracksInStream] Stopping ${tracks.length} tracks in ${streamName}`);
+    
+    tracks.forEach((track, index) => {
+      console.log(`  Track ${index}: ${track.kind} - ${track.label} - ${track.readyState}`);
+      
+      // Stop the track
+      track.stop();
+      
+      // Disable it
+      track.enabled = false;
+      
+      // Remove from stream
+      stream.removeTrack(track);
+      
+      console.log(`  Track ${index} after stop: ${track.readyState}`);
+    });
+    
+    console.log(`[stopAllTracksInStream] ${streamName} cleanup complete`);
+  };
+
+  // Debug: Log camera/mic state on mount and changes
+  useEffect(() => {
+    console.log('[EditorPageNew] Camera/Mic State:', { isCameraOn, isMicOn, hasLocalStream: !!localStream });
+  }, [isCameraOn, isMicOn, localStream]);
   const [activePanel, setActivePanel] = useState("explorer");
   const [contextMenu, setContextMenu] = useState({ show: false, x: 0, y: 0, item: null });
   const [showAccountMenu, setShowAccountMenu] = useState(false);
@@ -147,6 +177,9 @@ export default function EditorPage() {
 
   // WebRTC hook — peer connections, signaling, and remote video streams
   const { joinCall, leaveCall, remoteStreams: remoteParticipantStreams } = useWebRTC(socket, normalizedRoomId, userName, localStream);
+
+  // Auto-join video call when room is joined (but without camera/mic)
+  // REMOVED - Don't auto-join, let user manually join when they turn on camera/mic
 
   // Derive isHost from participants list
   const isHost = participants.find(p => p.isYou)?.isHost || false;
@@ -359,21 +392,45 @@ export default function EditorPage() {
   // ── MEDIA CONTROLS ───────────────────────────────────────────────────────
   const toggleMic = async () => {
     try {
+      console.log('[toggleMic] Called, current state:', { isMicOn, hasStream: !!localStream });
+      
       if (isMicOn && localStream) {
-        // TURN OFF
-        localStream.getAudioTracks().forEach(t => t.stop());
+        // TURN OFF - stop tracks properly
+        console.log('[toggleMic] Turning OFF mic');
+        
+        // Get all audio tracks and stop them IMMEDIATELY
+        const audioTracks = localStream.getAudioTracks();
+        console.log('[toggleMic] Stopping', audioTracks.length, 'audio tracks');
+        
+        audioTracks.forEach((track, index) => {
+          console.log(`[toggleMic] Stopping track ${index}:`, track.label, track.readyState);
+          track.stop();
+          track.enabled = false;
+          console.log(`[toggleMic] Track ${index} after stop:`, track.readyState);
+        });
+        
+        // Remove audio tracks from stream
+        audioTracks.forEach(track => localStream.removeTrack(track));
+        
         const remaining = localStream.getVideoTracks();
         const nextStream = remaining.length > 0 ? new MediaStream(remaining) : null;
+        
+        // Clear refs
         mediaStreamRef.current = nextStream;
         setLocalStream(nextStream);
         setIsMicOn(false);
+        
+        console.log('[toggleMic] Mic OFF complete, remaining tracks:', nextStream?.getTracks().length || 0);
         socket.emit("media-status-changed", { roomId: normalizedRoomId, isMicOn: false, isCameraOn });
         return;
       }
 
       // TURN ON
+      console.log('[toggleMic] Turning ON mic - requesting permission');
       const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       const audioTrack  = audioStream.getAudioTracks()[0];
+      console.log('[toggleMic] Got audio track:', audioTrack.label);
+      
       let nextStream;
       if (localStream) {
         nextStream = new MediaStream([...localStream.getVideoTracks(), audioTrack]);
@@ -384,7 +441,9 @@ export default function EditorPage() {
       setLocalStream(nextStream);
       setIsMicOn(true);
 
+      // Join call if not already in
       if (!isInCall) {
+        console.log('[toggleMic] Joining call');
         setIsInCall(true);
         setTimeout(joinCall, 150);
       }
@@ -397,21 +456,45 @@ export default function EditorPage() {
 
   const toggleCamera = async () => {
     try {
+      console.log('[toggleCamera] Called, current state:', { isCameraOn, hasStream: !!localStream });
+      
       if (isCameraOn && localStream) {
-        // TURN OFF
-        localStream.getVideoTracks().forEach(t => t.stop());
+        // TURN OFF - stop tracks properly
+        console.log('[toggleCamera] Turning OFF camera');
+        
+        // Get all video tracks and stop them IMMEDIATELY
+        const videoTracks = localStream.getVideoTracks();
+        console.log('[toggleCamera] Stopping', videoTracks.length, 'video tracks');
+        
+        videoTracks.forEach((track, index) => {
+          console.log(`[toggleCamera] Stopping track ${index}:`, track.label, track.readyState);
+          track.stop();
+          track.enabled = false;
+          console.log(`[toggleCamera] Track ${index} after stop:`, track.readyState);
+        });
+        
+        // Remove video tracks from stream
+        videoTracks.forEach(track => localStream.removeTrack(track));
+        
         const remaining = localStream.getAudioTracks();
         const nextStream = remaining.length > 0 ? new MediaStream(remaining) : null;
+        
+        // Clear refs
         mediaStreamRef.current = nextStream;
         setLocalStream(nextStream);
         setIsCameraOn(false);
+        
+        console.log('[toggleCamera] Camera OFF complete, remaining tracks:', nextStream?.getTracks().length || 0);
         socket.emit("media-status-changed", { roomId: normalizedRoomId, isMicOn, isCameraOn: false });
         return;
       }
 
       // TURN ON
+      console.log('[toggleCamera] Turning ON camera - requesting permission');
       const camStream  = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       const videoTrack = camStream.getVideoTracks()[0];
+      console.log('[toggleCamera] Got video track:', videoTrack.label);
+      
       let nextStream;
       if (localStream) {
         nextStream = new MediaStream([...localStream.getAudioTracks(), videoTrack]);
@@ -422,7 +505,9 @@ export default function EditorPage() {
       setLocalStream(nextStream);
       setIsCameraOn(true);
 
+      // Join call if not already in
       if (!isInCall) {
+        console.log('[toggleCamera] Joining call');
         setIsInCall(true);
         setTimeout(joinCall, 150);
       }
@@ -437,7 +522,10 @@ export default function EditorPage() {
     try {
       if (isScreenSharing) {
         // ── STOP screen share ──
-        screenStreamRef.current?.getTracks().forEach(t => t.stop());
+        screenStreamRef.current?.getTracks().forEach(t => {
+          t.stop();
+          t.enabled = false;
+        });
         screenStreamRef.current = null;
         setIsScreenSharing(false);
         socket.emit("screen-share-stopped", { roomId: normalizedRoomId, userName });
@@ -465,6 +553,7 @@ export default function EditorPage() {
       setIsScreenSharing(true);
       setIsCameraOn(true); // screen counts as "video on"
 
+      // Join call if not already in
       if (!isInCall) {
         setIsInCall(true);
         setTimeout(joinCall, 150);
@@ -473,6 +562,10 @@ export default function EditorPage() {
 
       // Auto-stop when the user hits the browser's "Stop sharing" button
       screenStream.getVideoTracks()[0].onended = () => {
+        screenStreamRef.current?.getTracks().forEach(t => {
+          t.stop();
+          t.enabled = false;
+        });
         screenStreamRef.current = null;
         setIsScreenSharing(false);
         setIsCameraOn(false);
@@ -489,9 +582,12 @@ export default function EditorPage() {
   };
 
   const handleHangUp = () => {
-    // Stop ALL tracks so the browser camera/mic LED turns off
-    mediaStreamRef.current?.getTracks().forEach(t => t.stop());
-    screenStreamRef.current?.getTracks().forEach(t => t.stop());
+    console.log('[handleHangUp] Stopping all media');
+    
+    // Use utility function to stop all tracks
+    stopAllTracksInStream(mediaStreamRef.current, 'mediaStream');
+    stopAllTracksInStream(screenStreamRef.current, 'screenStream');
+    
     mediaStreamRef.current  = null;
     screenStreamRef.current = null;
 
@@ -601,11 +697,17 @@ export default function EditorPage() {
     }
   };
 
-  // Stop all media tracks on unmount
+  // Stop all media tracks on unmount AND on mount (cleanup any previous session)
   useEffect(() => {
+    // Cleanup any existing media on mount
+    console.log('[EditorPageNew] Component mounted - cleaning up any existing media');
+    
     return () => {
-      mediaStreamRef.current?.getTracks().forEach(t => t.stop());
-      screenStreamRef.current?.getTracks().forEach(t => t.stop());
+      console.log('[EditorPageNew] Component unmounting - stopping all media');
+      stopAllTracksInStream(mediaStreamRef.current, 'mediaStream');
+      stopAllTracksInStream(screenStreamRef.current, 'screenStream');
+      mediaStreamRef.current = null;
+      screenStreamRef.current = null;
     };
   }, []);
 
@@ -1217,6 +1319,7 @@ export default function EditorPage() {
               };
             };
 
+            // Show ALL participants from room, not just those in video call
             const visibleParticipants = participants.slice(0, 3);
             const hiddenParticipants = participants.slice(3);
             const hiddenCount = hiddenParticipants.length;
@@ -1819,7 +1922,7 @@ function VideoTile({ participant, stream, isCameraOn, isMicOn, isLocal, isSpeaki
   // isCameraOn is the SIGNALED state from the remote peer; we cannot trust
   // track.enabled alone because remote tracks are always reported as enabled.
   const hasLiveVideoTrack = !!stream && stream.getVideoTracks().some(
-    t => t.readyState === "live"
+    t => t.readyState === "live" && t.enabled
   );
   const showVideo = hasLiveVideoTrack && isCameraOn;
 

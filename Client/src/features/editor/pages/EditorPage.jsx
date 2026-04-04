@@ -226,15 +226,12 @@ export default function EditorPage() {
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   
   // Video call state
-  const [showPreJoin, setShowPreJoin] = useState(false);
   const [showVideoCall, setShowVideoCall] = useState(false);
   const [isVideoPanelOpen, setIsVideoPanelOpen] = useState(true);
   const [isInCall, setIsInCall] = useState(false);
   // Get username from localStorage (set by JoinRoomModal)
   const [userName, setUserName] = useState(() => localStorage.getItem("syncide-username") || "");
   const [showJoinModal, setShowJoinModal] = useState(!userName);
-    const [showInvite, setShowInvite] = useState(false);
-    const inviteLink = `${window.location.origin}/editor/${roomId}`;
   
   const saveTimeout = useRef(null);
 
@@ -259,7 +256,46 @@ export default function EditorPage() {
     joinCall,
     leaveCall,
     cleanup: cleanupWebRTC,
-  } = useWebRTC(socket, roomId, userName, localStream);
+  } = useWebRTC({ socket, roomId, userName, localStream });
+
+  // Auto-start video call when user joins room
+  useEffect(() => {
+    if (userName && !isInCall) {
+      const autoJoinCall = async () => {
+        try {
+          // First enable camera and mic
+          await toggleCamera();
+          await toggleMic();
+          
+          // Small delay to ensure media is ready
+          setTimeout(() => {
+            joinCall();
+            setIsInCall(true);
+            setIsVideoPanelOpen(true);
+            console.log('[EditorPage] Auto-joined video call');
+          }, 500);
+        } catch (error) {
+          console.error('[EditorPage] Failed to auto-join:', error);
+        }
+      };
+      
+      // Only auto-join once, 1.5 seconds after username is set
+      const timer = setTimeout(autoJoinCall, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [userName]); // Only depend on userName, not isInCall
+
+  // Broadcast media status whenever it changes
+  useEffect(() => {
+    if (!socket || !roomId || !isInCall) return;
+    
+    console.log(`[EditorPage] Broadcasting media status: mic=${isMicOn}, camera=${isCameraOn}`);
+    socket.emit("media-status-changed", { 
+      roomId, 
+      isMicOn, 
+      isCameraOn 
+    });
+  }, [isMicOn, isCameraOn, isInCall, roomId]);
 
   // Socket connection
   useEffect(() => {
@@ -279,13 +315,23 @@ export default function EditorPage() {
     socket.on("connect", () => setIsConnected(true));
     socket.on("disconnect", () => setIsConnected(false));
 
+    // Cleanup on unmount
     return () => {
       socket.off("code-update");
       socket.off("room-users");
       socket.off("connect");
       socket.off("disconnect");
+      
+      // Clean up video call if active
+      if (isInCall) {
+        stopAll();
+        cleanupWebRTC();
+      }
+      
+      // Leave room
+      socket.emit("leave-room", roomId);
     };
-  }, [roomId, userName]);
+  }, [roomId, userName, isInCall, stopAll, cleanupWebRTC]);
 
   // Show join modal if username is missing
   const handleJoinModalClose = (name) => {
@@ -372,29 +418,9 @@ export default function EditorPage() {
   // Video call handlers
   const handleToggleVideoCall = useCallback(() => {
     if (isInCall) {
-      // Open fullscreen video call view
       setShowVideoCall(true);
-    } else {
-      // Show pre-join screen
-      setShowPreJoin(true);
     }
   }, [isInCall]);
-
-  const handleJoinCall = useCallback(async ({ stream, isCameraOn: camOn, isMicOn: micOn }) => {
-    setShowPreJoin(false);
-    setIsInCall(true);
-    setIsVideoPanelOpen(true);
-
-    // Mirror the pre-join selections inside the persistent media stream
-    if (camOn !== isCameraOn) {
-      await toggleCamera();
-    }
-    if (micOn !== isMicOn) {
-      await toggleMic();
-    }
-
-    joinCall();
-  }, [isCameraOn, isMicOn, joinCall, toggleCamera, toggleMic]);
 
   const handleEndCall = useCallback(() => {
     stopAll();
@@ -407,14 +433,10 @@ export default function EditorPage() {
   }, [roomId, userName, cleanupWebRTC, stopAll]);
 
   const handleStartCall = useCallback(() => {
-    try {
-      if (!isInCall) {
-        joinCall();
-        setIsInCall(true);
-        setIsVideoPanelOpen(true);
-      }
-    } catch (error) {
-      console.error("Failed to start call:", error);
+    if (!isInCall) {
+      joinCall();
+      setIsInCall(true);
+      setIsVideoPanelOpen(true);
     }
   }, [isInCall, joinCall]);
 
@@ -505,6 +527,7 @@ export default function EditorPage() {
                 onToggle={() => setIsVideoPanelOpen(!isVideoPanelOpen)}
                 localStream={localStream}
                 remoteStreams={remoteStreams}
+                peerStatuses={peerStatuses}
                 isCameraOn={isCameraOn}
                 isMicOn={isMicOn}
                 isScreenSharing={isScreenSharing}
@@ -585,17 +608,6 @@ export default function EditorPage() {
             onClick={() => setIsRightPanelCollapsed(true)}
           />
         )}
-      </AnimatePresence>
-
-      {/* Pre-Join Screen Modal */}
-      <AnimatePresence>
-        <PreJoinScreen
-          isOpen={showPreJoin}
-          onClose={() => setShowPreJoin(false)}
-          onJoin={handleJoinCall}
-          userName={userName}
-          roomId={roomId}
-        />
       </AnimatePresence>
 
       {/* Full Screen Video Call */}

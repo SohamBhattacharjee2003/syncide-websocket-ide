@@ -1,147 +1,16 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import {
   VscUnmute,
   VscMute,
-  VscDeviceCameraVideo,
   VscClose,
-  VscScreenFull,
-  VscScreenNormal,
-  VscPinned,
-  VscRecord,
-  VscStopCircle,
-  VscChevronUp,
-  VscChevronDown,
 } from "react-icons/vsc";
 import {
   HiOutlineVideoCamera,
   HiOutlineVideoCameraSlash,
   HiOutlineComputerDesktop,
   HiOutlinePhone,
-  HiOutlineUserGroup,
-  HiOutlineCog,
-  HiOutlineHandRaised,
-  HiOutlineChatBubbleLeftRight,
 } from "react-icons/hi2";
-
-// Video tile component
-const VideoTile = ({ 
-  stream, 
-  name, 
-  isMuted = false, 
-  isLocal = false, 
-  isScreenShare = false,
-  isPinned = false,
-  onPin,
-  size = "normal" 
-}) => {
-  const videoRef = useRef(null);
-
-  useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
-  }, [stream]);
-
-  const sizeClasses = {
-    small: "w-32 h-24",
-    normal: "w-full h-full",
-    large: "w-full h-full",
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      className={`
-        relative bg-neutral-900 rounded-xl overflow-hidden
-        ${sizeClasses[size]}
-        ${isPinned ? "ring-2 ring-emerald-400" : ""}
-      `}
-    >
-      {stream ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted={isLocal || isMuted}
-          className={`w-full h-full object-cover ${isLocal ? "transform -scale-x-100" : ""}`}
-        />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-neutral-800 to-neutral-900">
-          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center text-white text-2xl font-semibold">
-            {name?.charAt(0)?.toUpperCase() || "?"}
-          </div>
-        </div>
-      )}
-
-      {/* Name badge */}
-      <div className="absolute bottom-2 left-2 flex items-center gap-2">
-        <div className="px-2 py-1 bg-black/60 backdrop-blur-sm rounded-md flex items-center gap-1.5">
-          {isMuted && <VscMute className="w-3 h-3 text-red-400" />}
-          <span className="text-xs text-white font-medium">
-            {isLocal ? "You" : name}
-            {isScreenShare && " (Screen)"}
-          </span>
-        </div>
-      </div>
-
-      {/* Pin button */}
-      {onPin && !isLocal && (
-        <motion.button
-          onClick={onPin}
-          className="absolute top-2 right-2 p-1.5 bg-black/60 backdrop-blur-sm rounded-lg text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/80"
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-        >
-          <VscPinned className={`w-4 h-4 ${isPinned ? "text-emerald-400" : ""}`} />
-        </motion.button>
-      )}
-
-      {/* Speaking indicator */}
-      <motion.div
-        className="absolute inset-0 rounded-xl ring-2 ring-emerald-400 pointer-events-none"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 0 }}
-      />
-    </motion.div>
-  );
-};
-
-// Control button component
-const ControlButton = ({ icon: IconComponent, label, onClick, active, danger, disabled }) => {
-  const handleClick = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!disabled && onClick) {
-      console.log(`[ControlButton] Clicked: ${label}`);
-      onClick();
-    }
-  };
-
-  return (
-    <motion.button
-      onClick={handleClick}
-      disabled={disabled}
-      className={`
-        relative flex flex-col items-center gap-1 p-3 rounded-xl transition-all
-        ${disabled ? "opacity-50 cursor-not-allowed" : ""}
-        ${danger 
-          ? "bg-red-500/20 text-red-400 hover:bg-red-500/30" 
-          : active 
-            ? "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
-            : "bg-white/5 text-neutral-400 hover:bg-white/10 hover:text-white"
-        }
-      `}
-      whileHover={!disabled ? { scale: 1.05 } : {}}
-      whileTap={!disabled ? { scale: 0.95 } : {}}
-    >
-      <IconComponent className="w-5 h-5" />
-      <span className="text-[10px] font-medium">{label}</span>
-    </motion.button>
-  );
-};
 
 export default function VideoCall({
   isOpen,
@@ -156,368 +25,254 @@ export default function VideoCall({
   onToggleMic,
   onStartScreenShare,
   onStopScreenShare,
+  onStartCall,
   onEndCall,
   users = [],
   userName = "You",
 }) {
-  const [isMinimized, setIsMinimized] = useState(false);
-  const [pinnedUser, setPinnedUser] = useState(null);
-  const [layout] = useState("grid"); // grid, spotlight, sidebar
-  const [showParticipants, setShowParticipants] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [handRaised, setHandRaised] = useState(false);
+  const participants = Array.from(
+    remoteStreams instanceof Map ? remoteStreams.entries() : Object.entries(remoteStreams)
+  );
 
-  const participants = Array.isArray(remoteStreams) 
-    ? remoteStreams 
-    : remoteStreams instanceof Map 
-      ? Array.from(remoteStreams.entries())
-      : Object.entries(remoteStreams);
+  const allParticipants = [
+    {
+      id: "local",
+      stream: localStream,
+      name: userName || "You",
+      isLocal: true,
+      isCameraOff: !isCameraOn,
+      isMicOff: !isMicOn,
+      isHost: users.find((u) => u.name === userName)?.isHost || false,
+    },
+    ...participants
+      .filter(([id, data]) => {
+        // Only show participants that have valid userName from server
+        const userInfo = users.find((u) => u.id === id);
+        const hasValidName = data?.userName || userInfo?.name;
+        return hasValidName && id !== "local"; // Don't duplicate local user
+      })
+      .map(([id, data]) => {
+        const stream = data?.stream ?? data;
+        const userInfo = users.find((u) => u.id === id);
+        const participantName = data?.userName || userInfo?.name;
+
+        return {
+          id,
+          stream,
+          name: participantName,
+          isLocal: false,
+          isCameraOff: !data?.isCameraOn,
+          isMicOff: !data?.isMicOn,
+          isHost: userInfo?.isHost || false,
+        };
+      }),
+  ];
 
   if (!isOpen) return null;
 
-  // Minimized view
-  if (isMinimized) {
-    return (
+  return (
+    <AnimatePresence>
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="fixed bottom-20 right-4 z-50"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-[#202124] z-50 flex flex-col"
       >
-        <div className="bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
-          {/* Mini video */}
-          <div className="relative w-48 h-36">
-            <VideoTile
-              stream={localStream}
-              name={userName}
-              isLocal
-              isMuted={!isMicOn}
-              size="normal"
-            />
-            
-            {/* Expand button */}
-            <motion.button
-              onClick={() => setIsMinimized(false)}
-              className="absolute top-2 right-2 p-1.5 bg-black/60 backdrop-blur-sm rounded-lg text-white hover:bg-black/80"
-              whileHover={{ scale: 1.1 }}
-            >
-              <VscScreenFull className="w-4 h-4" />
-            </motion.button>
+        {/* Header */}
+        <div className="h-16 bg-[#202124] border-b border-[#3c4043] flex items-center justify-between px-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-[#3c4043] flex items-center justify-center">
+              <HiOutlineVideoCamera className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-white text-lg font-medium">Video Call</h2>
+              <p className="text-[#9aa0a6] text-sm">
+                {allParticipants.length} participant{allParticipants.length !== 1 ? "s" : ""}
+              </p>
+            </div>
           </div>
 
-          {/* Mini controls */}
-          <div className="flex items-center justify-center gap-2 p-2 bg-black/40">
-            <motion.button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log("[VideoCall] Mic button clicked");
-                onToggleMic?.();
-              }}
-              className={`p-2 rounded-full ${isMicOn ? "bg-white/10" : "bg-red-500/20 text-red-400"}`}
-              whileTap={{ scale: 0.9 }}
-            >
-              {isMicOn ? <VscUnmute className="w-4 h-4" /> : <VscMute className="w-4 h-4" />}
-            </motion.button>
-            <motion.button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log("[VideoCall] Camera button clicked");
-                onToggleCamera?.();
-              }}
-              className={`p-2 rounded-full ${isCameraOn ? "bg-white/10" : "bg-red-500/20 text-red-400"}`}
-              whileTap={{ scale: 0.9 }}
-            >
-              {isCameraOn ? <HiOutlineVideoCamera className="w-4 h-4" /> : <HiOutlineVideoCameraSlash className="w-4 h-4" />}
-            </motion.button>
-            <motion.button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log("[VideoCall] End call button clicked");
-                onEndCall?.();
-              }}
-              className="p-2 rounded-full bg-red-500 text-white"
-              whileTap={{ scale: 0.9 }}
-            >
-              <HiOutlinePhone className="w-4 h-4 rotate-135" />
-            </motion.button>
+          <motion.button
+            onClick={onClose}
+            className="p-2 hover:bg-[#3c4043] rounded-full text-[#9aa0a6] hover:text-white transition-all"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <VscClose className="w-6 h-6" />
+          </motion.button>
+        </div>
+
+        {/* Video Grid */}
+        <div className="flex-1 p-6 overflow-auto">
+          <div
+            className={`grid gap-4 h-full ${
+              allParticipants.length === 1
+                ? "grid-cols-1"
+                : allParticipants.length === 2
+                ? "grid-cols-2"
+                : allParticipants.length <= 4
+                ? "grid-cols-2 grid-rows-2"
+                : allParticipants.length <= 6
+                ? "grid-cols-3 grid-rows-2"
+                : "grid-cols-3 grid-rows-3"
+            }`}
+          >
+            {allParticipants.map((participant, index) => (
+              <VideoTile
+                key={participant.id}
+                stream={participant.stream}
+                name={participant.name}
+                isLocal={participant.isLocal}
+                isMuted={participant.isMicOff}
+                isCameraOff={participant.isCameraOff}
+                isHost={participant.isHost}
+                index={index}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Bottom Controls Bar - Google Meet Style */}
+        <div className="h-24 bg-[#202124] border-t border-[#3c4043] flex items-center justify-center px-6">
+          <div className="flex items-center gap-4">
+            {/* Microphone */}
+            <div className="flex flex-col items-center gap-2">
+              <motion.button
+                onClick={onToggleMic}
+                className={`p-4 rounded-full transition-all ${
+                  isMicOn
+                    ? "bg-[#3c4043] hover:bg-[#5f6368] text-white"
+                    : "bg-red-600 hover:bg-red-700 text-white"
+                }`}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                {isMicOn ? <VscUnmute className="w-6 h-6" /> : <VscMute className="w-6 h-6" />}
+              </motion.button>
+              <span className="text-xs text-[#9aa0a6]">{isMicOn ? "Mute" : "Unmute"}</span>
+            </div>
+
+            {/* Camera */}
+            <div className="flex flex-col items-center gap-2">
+              <motion.button
+                onClick={onToggleCamera}
+                className={`p-4 rounded-full transition-all ${
+                  isCameraOn
+                    ? "bg-[#3c4043] hover:bg-[#5f6368] text-white"
+                    : "bg-red-600 hover:bg-red-700 text-white"
+                }`}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                {isCameraOn ? (
+                  <HiOutlineVideoCamera className="w-6 h-6" />
+                ) : (
+                  <HiOutlineVideoCameraSlash className="w-6 h-6" />
+                )}
+              </motion.button>
+              <span className="text-xs text-[#9aa0a6]">{isCameraOn ? "Stop video" : "Start video"}</span>
+            </div>
+
+            {/* Screen Share */}
+            <div className="flex flex-col items-center gap-2">
+              <motion.button
+                onClick={isScreenSharing ? onStopScreenShare : onStartScreenShare}
+                className={`p-4 rounded-full transition-all ${
+                  isScreenSharing
+                    ? "bg-[#1a73e8] hover:bg-[#1765cc] text-white"
+                    : "bg-[#3c4043] hover:bg-[#5f6368] text-white"
+                }`}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <HiOutlineComputerDesktop className="w-6 h-6" />
+              </motion.button>
+              <span className="text-xs text-[#9aa0a6]">
+                {isScreenSharing ? "Stop presenting" : "Present now"}
+              </span>
+            </div>
+
+            {/* End Call */}
+            <div className="flex flex-col items-center gap-2 ml-4">
+              <motion.button
+                onClick={onEndCall}
+                className="p-4 rounded-full bg-red-600 hover:bg-red-700 text-white transition-all"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <HiOutlinePhone className="w-6 h-6 rotate-[135deg]" />
+              </motion.button>
+              <span className="text-xs text-[#9aa0a6]">Leave call</span>
+            </div>
           </div>
         </div>
       </motion.div>
-    );
-  }
+    </AnimatePresence>
+  );
+}
+
+// Video tile component
+function VideoTile({ stream, name, isLocal, isMuted, isCameraOff, isHost, index }) {
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  const gradients = [
+    "from-blue-500 to-blue-600",
+    "from-green-500 to-green-600",
+    "from-purple-500 to-purple-600",
+    "from-orange-500 to-orange-600",
+    "from-pink-500 to-pink-600",
+    "from-teal-500 to-teal-600",
+  ];
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 bg-[#0a0a0a]"
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ delay: index * 0.05 }}
+      className="relative w-full h-full rounded-2xl overflow-hidden bg-[#3c4043] shadow-2xl"
     >
-      {/* Header */}
-      <div className="absolute top-0 left-0 right-0 h-14 bg-gradient-to-b from-black/80 to-transparent z-10 flex items-center justify-between px-4">
-        <div className="flex items-center gap-3">
-          <motion.div
-            className="w-2 h-2 rounded-full bg-red-500"
-            animate={{ scale: [1, 1.2, 1] }}
-            transition={{ duration: 1, repeat: Infinity }}
-          />
-          <span className="text-white font-medium">SyncIDE Meeting</span>
-          <span className="text-neutral-500 text-sm">|</span>
-          <span className="text-neutral-400 text-sm">{participants.length + 1} participants</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {isRecording && (
-            <div className="flex items-center gap-1.5 px-2 py-1 bg-red-500/20 rounded-full">
-              <motion.div
-                className="w-2 h-2 rounded-full bg-red-500"
-                animate={{ opacity: [1, 0.5, 1] }}
-                transition={{ duration: 1, repeat: Infinity }}
-              />
-              <span className="text-xs text-red-400 font-medium">Recording</span>
-            </div>
-          )}
-          
-          <motion.button
-            onClick={() => setIsMinimized(true)}
-            className="p-2 text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg"
-            whileHover={{ scale: 1.05 }}
+      {/* Video or Avatar */}
+      {stream && !isCameraOff ? (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={isLocal}
+          className={`w-full h-full object-cover ${isLocal ? "transform -scale-x-100" : ""}`}
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center bg-[#3c4043]">
+          <div
+            className={`w-24 h-24 rounded-full bg-gradient-to-br ${
+              gradients[index % gradients.length]
+            } flex items-center justify-center text-white text-4xl font-bold shadow-2xl`}
           >
-            <VscScreenNormal className="w-5 h-5" />
-          </motion.button>
-          
-          <motion.button
-            onClick={onClose}
-            className="p-2 text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg"
-            whileHover={{ scale: 1.05 }}
-          >
-            <VscClose className="w-5 h-5" />
-          </motion.button>
-        </div>
-      </div>
-
-      {/* Main video area */}
-      <div className="absolute inset-0 pt-14 pb-24 px-4">
-        <div className="h-full flex gap-4">
-          {/* Video grid */}
-          <div className="flex-1 flex items-center justify-center">
-            {layout === "grid" && (
-              <div className={`
-                grid gap-3 w-full h-full max-w-6xl
-                ${participants.length === 0 ? "grid-cols-1" : ""}
-                ${participants.length === 1 ? "grid-cols-2" : ""}
-                ${participants.length >= 2 && participants.length <= 3 ? "grid-cols-2 grid-rows-2" : ""}
-                ${participants.length >= 4 ? "grid-cols-3 grid-rows-2" : ""}
-              `}>
-                {/* Local video */}
-                <div className="group">
-                  <VideoTile
-                    stream={localStream}
-                    name={userName}
-                    isLocal
-                    isMuted={!isMicOn}
-                  />
-                </div>
-
-                {/* Screen share (if active) */}
-                {isScreenSharing && screenStream && (
-                  <div className="col-span-full row-span-1 group">
-                    <VideoTile
-                      stream={screenStream}
-                      name={userName}
-                      isScreenShare
-                      isLocal
-                    />
-                  </div>
-                )}
-
-                {/* Remote participants */}
-                {participants.map(([peerId, data]) => {
-                  const stream = data?.stream ?? data;
-                  const isMuted = data?.isMicOn === false;
-                  return (
-                    <div key={peerId} className="group">
-                      <VideoTile
-                        stream={stream}
-                        name={users.find(u => u.id === peerId)?.name || "Participant"}
-                        isMuted={isMuted}
-                        isPinned={pinnedUser === peerId}
-                        onPin={() => setPinnedUser(pinnedUser === peerId ? null : peerId)}
-                      />
-                    </div>
-                  );
-                })}
-
-                {/* Empty state */}
-                {participants.length === 0 && !localStream && (
-                  <div className="flex flex-col items-center justify-center gap-4 text-neutral-500">
-                    <HiOutlineUserGroup className="w-16 h-16 opacity-30" />
-                    <p className="text-lg">Waiting for others to join...</p>
-                    <p className="text-sm">Share the room ID to invite participants</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Spotlight layout */}
-            {layout === "spotlight" && pinnedUser && (
-              <div className="w-full h-full flex gap-3">
-                <div className="flex-1">
-                  <VideoTile
-                    stream={remoteStreams instanceof Map ? remoteStreams.get(pinnedUser)?.stream : remoteStreams[pinnedUser]?.stream}
-                    name={users.find(u => u.id === pinnedUser)?.name || "Participant"}
-                    isPinned
-                    size="large"
-                  />
-                </div>
-                <div className="w-48 flex flex-col gap-2 overflow-y-auto">
-                  <VideoTile
-                    stream={localStream}
-                    name={userName}
-                    isLocal
-                    isMuted={!isMicOn}
-                    size="small"
-                  />
-                  {participants
-                    .filter(([id]) => id !== pinnedUser)
-                    .map(([peerId, data]) => (
-                      <VideoTile
-                        key={peerId}
-                        stream={data?.stream ?? data}
-                        name={users.find(u => u.id === peerId)?.name || "Participant"}
-                        size="small"
-                        onPin={() => setPinnedUser(peerId)}
-                      />
-                    ))}
-                </div>
-              </div>
-            )}
+            {name?.charAt(0)?.toUpperCase() || "?"}
           </div>
-
-          {/* Participants sidebar */}
-          <AnimatePresence>
-            {showParticipants && (
-              <motion.div
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: 280, opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
-                className="bg-neutral-900/80 backdrop-blur-sm rounded-xl border border-white/5 overflow-hidden"
-              >
-                <div className="p-4 border-b border-white/5">
-                  <h3 className="text-white font-medium">Participants ({participants.length + 1})</h3>
-                </div>
-                <div className="p-2 space-y-1 max-h-96 overflow-y-auto">
-                  {/* Local user */}
-                  <div className="flex items-center gap-3 p-2 rounded-lg bg-white/5">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center text-white text-sm font-medium">
-                      {userName.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm text-white">{userName} (You)</p>
-                      <p className="text-xs text-emerald-400">Host</p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {!isMicOn && <VscMute className="w-4 h-4 text-red-400" />}
-                      {!isCameraOn && <HiOutlineVideoCameraSlash className="w-4 h-4 text-red-400" />}
-                    </div>
-                  </div>
-
-                  {/* Remote participants */}
-                  {users.filter(u => u.id !== "local").map((user, index) => (
-                    <div key={user.id || index} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-sm font-medium">
-                        {user.name?.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm text-white">{user.name}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
         </div>
-      </div>
+      )}
 
-      {/* Controls bar */}
-      <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/80 to-transparent">
-        <div className="h-full flex items-center justify-center gap-3">
-          {/* Mic */}
-          <ControlButton
-            icon={isMicOn ? VscUnmute : VscMute}
-            label={isMicOn ? "Mute" : "Unmute"}
-            onClick={onToggleMic}
-            active={isMicOn}
-          />
+      {/* Gradient overlay at bottom */}
+      <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/80 via-black/40 to-transparent pointer-events-none" />
 
-          {/* Camera */}
-          <ControlButton
-            icon={isCameraOn ? HiOutlineVideoCamera : HiOutlineVideoCameraSlash}
-            label={isCameraOn ? "Stop Video" : "Start Video"}
-            onClick={onToggleCamera}
-            active={isCameraOn}
-          />
-
-          {/* Screen Share */}
-          <ControlButton
-            icon={HiOutlineComputerDesktop}
-            label={isScreenSharing ? "Stop Share" : "Share Screen"}
-            onClick={isScreenSharing ? onStopScreenShare : onStartScreenShare}
-            active={isScreenSharing}
-          />
-
-          {/* Raise Hand */}
-          <ControlButton
-            icon={HiOutlineHandRaised}
-            label={handRaised ? "Lower Hand" : "Raise Hand"}
-            onClick={() => setHandRaised(!handRaised)}
-            active={handRaised}
-          />
-
-          {/* Participants */}
-          <ControlButton
-            icon={HiOutlineUserGroup}
-            label="Participants"
-            onClick={() => setShowParticipants(!showParticipants)}
-            active={showParticipants}
-          />
-
-          {/* Chat */}
-          <ControlButton
-            icon={HiOutlineChatBubbleLeftRight}
-            label="Chat"
-            onClick={() => {}}
-          />
-
-          {/* Record */}
-          <ControlButton
-            icon={isRecording ? VscStopCircle : VscRecord}
-            label={isRecording ? "Stop Rec" : "Record"}
-            onClick={() => setIsRecording(!isRecording)}
-            active={isRecording}
-            danger={isRecording}
-          />
-
-          {/* Settings */}
-          <ControlButton
-            icon={HiOutlineCog}
-            label="Settings"
-            onClick={() => {}}
-          />
-
-          {/* Leave/End Call */}
-          <motion.button
-            onClick={onEndCall}
-            className="flex items-center gap-2 px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-medium transition-colors"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <HiOutlinePhone className="w-5 h-5 rotate-135" />
-            <span>Leave</span>
-          </motion.button>
+      {/* Name and status */}
+      <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
+        <div className="flex items-center gap-2 px-3 py-2 bg-black/70 backdrop-blur-md rounded-lg">
+          {isMuted && <VscMute className="w-4 h-4 text-red-400" />}
+          <span className="text-sm text-white font-medium truncate max-w-[200px]">
+            {isLocal ? "You" : name}
+          </span>
+          {isHost && (
+            <span className="px-2 py-0.5 bg-blue-500 text-white text-xs rounded-full font-medium">
+              Host
+            </span>
+          )}
         </div>
       </div>
     </motion.div>

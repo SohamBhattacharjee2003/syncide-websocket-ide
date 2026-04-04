@@ -9,42 +9,14 @@ const ICE_SERVERS = {
   ],
 };
 
-// ─── DUMMY STREAM GENERATOR ─────────────────────────────────────────────
-// Creates a silent audio track and black video track so that WebRTC can
-// establish a permanent flow of bytes. We use `replaceTrack` to swap in
-// real tracks later, completely avoiding fragile renegotiation bugs!
-const createDummyStream = () => {
-  const canvas = document.createElement("canvas");
-  canvas.width = 640;
-  canvas.height = 480;
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "black";
-  ctx.fillRect(0, 0, 640, 480);
-  const videoStream = canvas.captureStream(1);
-
-  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const dest = audioCtx.createMediaStreamDestination();
-  return new MediaStream([
-    ...videoStream.getVideoTracks(),
-    ...dest.stream.getAudioTracks(),
-  ]);
-};
-
-let sharedDummyStream = null;
-const getDummyStream = () => {
-  if (!sharedDummyStream) sharedDummyStream = createDummyStream();
-  return sharedDummyStream;
-};
-
 /**
- * useWebRTC — The "Holy Grail" Negotiation Pattern.
+ * useWebRTC — Perfect Negotiation with Transceiver Pre-Warming
  * 
- * 1. Automatically seeds every connection with a Dummy Stream (silence+black).
- * 2. Perfect Negotiation establishes the WebRTC tunnel once and forever.
- * 3. Toggling camera/mic ONLY hot-swaps tracks via replaceTrack() using the
- *    stable tunnel. Zero renegotiation = zero timing bugs!
+ * 1. Proactively adds "sendrecv" transceivers for audio/video even before hardware is allowed.
+ * 2. Uses replaceTrack() to seamlessly pipe live camera bytes into the pre-warmed tunnel.
+ * 3. Never adds or removes tracks dynamically, entirely avoiding negotiation collision bugs across browsers.
  */
-export default function useWebRTC(socket, roomId, userName, localStream) {
+export default function useWebRTC({ socket, roomId, userName, localStream }) {
   const [remoteStreams, setRemoteStreams] = useState(new Map());
   const [peerStatuses, setPeerStatuses]  = useState(new Map());
 
@@ -54,10 +26,12 @@ export default function useWebRTC(socket, roomId, userName, localStream) {
   const socketRef     = useRef(socket);
   const roomIdRef     = useRef(roomId);
   const userNameRef   = useRef(userName);
+  const localStreamRef = useRef(localStream);
 
   useEffect(() => { socketRef.current = socket; }, [socket]);
   useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
   useEffect(() => { userNameRef.current = userName; }, [userName]);
+  useEffect(() => { localStreamRef.current = localStream; }, [localStream]);
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -89,15 +63,15 @@ export default function useWebRTC(socket, roomId, userName, localStream) {
     politeRef.current.set(peerId, isPolite);
     makingOffer.current.set(peerId, false);
 
-    // ── Seed Connection with Dummy Tracks (Forces early negotiation) ──
-    const dummy = getDummyStream();
-    dummy.getTracks().forEach(t => pc.addTrack(t, dummy));
+    // ── Pre-Warm Transceivers (Forces early negotiation of both media types) ──
+    pc.addTransceiver("audio", { direction: "sendrecv" });
+    pc.addTransceiver("video", { direction: "sendrecv" });
 
     // ── negotiation needed (Perfect Negotiation) ──
     pc.onnegotiationneeded = async () => {
       try {
         makingOffer.current.set(peerId, true);
-        await pc.setLocalDescription();
+        await pc.setLocalDescription(); // automatically triggers createOffer implicitly
         socketRef.current?.emit("video-offer", {
           roomId: roomIdRef.current,
           offer:  pc.localDescription,
@@ -122,29 +96,54 @@ export default function useWebRTC(socket, roomId, userName, localStream) {
     };
 
     pc.oniceconnectionstatechange = () => {
+      console.log(`[WebRTC] ICE state for ${peerId}: ${pc.iceConnectionState}`);
       if (pc.iceConnectionState === "failed") pc.restartIce?.();
     };
 
     // ── remote tracks ──
     pc.ontrack = ({ track, streams }) => {
-      console.log(`[WebRTC] ontrack(${track.kind}) from ${peerId}`);
-      // remote audio/video will arrive inside `streams[0]` because they share the dummy stream ID
-      if (streams && streams[0]) {
-        setRemoteStreams(prev => {
-          const m = new Map(prev);
-          m.set(peerId, { stream: streams[0], lastUpdate: Date.now() });
-          return m;
-        });
-      }
+      console.log(`[WebRTC] ontrack(${track.kind}) from ${peerId} stream count = ${streams.length}`);
+      
+      setRemoteStreams(prev => {
+        const m = new Map(prev);
+        const existingInfo = m.get(peerId);
+        let nextStream;
+        
+        // Native Transceivers do NOT perfectly join the same MediaStream by default unless explicitly attached.
+        if (existingInfo && existingInfo.stream) {
+          const currentTracks = existingInfo.stream.getTracks();
+          if (!currentTracks.includes(track)) {
+            // CRITICAL BUG FIX: Do NOT mutate nextStream.addTrack(track)
+            // Creating a new MediaStream changes the stream ID, forcing React's <video> key to remount!
+            nextStream = new MediaStream([...currentTracks, track]);
+          } else {
+            nextStream = existingInfo.stream;
+          }
+        } else {
+          // No stream yet, so initialize it with this track
+          // ALWAYS create a fresh MediaStream to ensure stable IDs
+          const initialTracks = streams[0] ? streams[0].getTracks() : [];
+          if (!initialTracks.includes(track)) initialTracks.push(track);
+          nextStream = new MediaStream(initialTracks);
+        }
 
-      // Fallback muting listeners (purely auxiliary)
-      track.onmute = () => { /* purely browser-driven, handled by media-status-changed primarily */ };
+        
+        m.set(peerId, { 
+          ...existingInfo, // Preserve existing metadata like userName
+          stream: nextStream, 
+          lastUpdate: Date.now() 
+        });
+        return m;
+      });
+
+      // Purely auxiliary
+      track.onmute = () => {};
       track.onunmute = () => {};
     };
 
     // ── connection state ──
     pc.onconnectionstatechange = () => {
-      console.log(`[WebRTC] ${peerId} → ${pc.connectionState}`);
+      console.log(`[WebRTC] ${peerId} Connection State → ${pc.connectionState}`);
       if (pc.connectionState === "failed" || pc.connectionState === "closed") {
         removePeer(peerId);
       }
@@ -157,16 +156,19 @@ export default function useWebRTC(socket, roomId, userName, localStream) {
   // ── join / leave ──────────────────────────────────────────────────────────
 
   const joinCall = useCallback(() => {
-    if (!socketRef.current || !roomIdRef.current) return;
+    if (!socketRef.current || !roomIdRef.current) {
+      console.log("[WebRTC] Cannot join: missing socket or roomId");
+      return;
+    }
+    
+    console.log(`[WebRTC] Joining video call with userName=${userNameRef.current}`);
     socketRef.current.emit("join-video-call", {
       roomId:   roomIdRef.current,
       userName: userNameRef.current,
     });
   }, []);
 
-  useEffect(() => {
-    if (socket && roomId && userName) joinCall();
-  }, [socket, roomId, userName, joinCall]);
+  // Auto-join removed - let component control when to join
 
   const leaveCall = useCallback(() => {
     socketRef.current?.emit("leave-video-call", {
@@ -186,12 +188,49 @@ export default function useWebRTC(socket, roomId, userName, localStream) {
   useEffect(() => {
     if (!socket) return;
 
-    const handleUserJoined = ({ peerId }) => {
+    const handleUserJoined = ({ peerId, userName }) => {
+      console.log(`[WebRTC] User joined: ${peerId} (${userName})`);
       createPeerConnection(peerId, false); // existing peer -> impolite
+      
+      // Store the userName with the peer's data
+      setRemoteStreams(prev => {
+        const m = new Map(prev);
+        const existingInfo = m.get(peerId) || {};
+        m.set(peerId, { ...existingInfo, userName, lastUpdate: Date.now() });
+        return m;
+      });
+
+      // Broadcast current media status to the new joiner
+      const currentStream = localStreamRef.current;
+      const currentMic = currentStream?.getAudioTracks().some(t => t.enabled && t.readyState === 'live') ?? false;
+      const currentCam = currentStream?.getVideoTracks().some(t => t.enabled && t.readyState === 'live') ?? false;
+      socket.emit("media-status-changed", { roomId, isMicOn: currentMic, isCameraOn: currentCam });
     };
 
     const handleExistingPeers = (peers) => {
-      peers.forEach(({ peerId }) => createPeerConnection(peerId, true)); // joiner -> polite
+      console.log(`[WebRTC] Received existing peers:`, peers);
+      peers.forEach(({ peerId, userName }) => {
+        console.log(`[WebRTC] Creating connection for existing peer: ${peerId} (${userName})`);
+        createPeerConnection(peerId, true); // joiner -> polite
+        
+        // Store the userName with the peer's data (polite side)
+        setRemoteStreams(prev => {
+          const m = new Map(prev);
+          const existingInfo = m.get(peerId) || {};
+          const updatedInfo = { ...existingInfo, userName, lastUpdate: Date.now() };
+          m.set(peerId, updatedInfo);
+          console.log(`[WebRTC] Stored peer info for ${peerId}:`, updatedInfo);
+          return m;
+        });
+      });
+    };
+
+    const handleRequestMediaStatus = ({ from }) => {
+      console.log(`[WebRTC] Media status requested by ${from}`);
+      const currentStream = localStreamRef.current;
+      const currentMic = currentStream?.getAudioTracks().some(t => t.enabled && t.readyState === 'live') ?? false;
+      const currentCam = currentStream?.getVideoTracks().some(t => t.enabled && t.readyState === 'live') ?? false;
+      socket.emit("media-status-changed", { roomId, isMicOn: currentMic, isCameraOn: currentCam });
     };
 
     const handleOffer = async ({ offer, from }) => {
@@ -241,14 +280,23 @@ export default function useWebRTC(socket, roomId, userName, localStream) {
       }
     };
 
-    const handleLeft = ({ peerId }) => removePeer(peerId);
+    const handleLeft = ({ peerId, userName }) => {
+      console.log(`[WebRTC] User left: ${peerId} (${userName})`);
+      removePeer(peerId);
+    };
 
     const handleStatusUpdate = ({ peerId, isMicOn, isCameraOn }) => {
-      setPeerStatuses(prev => new Map(prev).set(peerId, { isMicOn, isCameraOn }));
+      console.log(`[WebRTC] Status update for ${peerId}: mic=${isMicOn}, camera=${isCameraOn}`);
+      setPeerStatuses(prev => {
+        const updated = new Map(prev);
+        updated.set(peerId, { isMicOn, isCameraOn });
+        return updated;
+      });
     };
 
     socket.on("user-joined-video",    handleUserJoined);
     socket.on("existing-video-peers", handleExistingPeers);
+    socket.on("request-media-status", handleRequestMediaStatus);
     socket.on("video-offer",          handleOffer);
     socket.on("video-answer",         handleAnswer);
     socket.on("ice-candidate",        handleIce);
@@ -258,6 +306,7 @@ export default function useWebRTC(socket, roomId, userName, localStream) {
     return () => {
       socket.off("user-joined-video",    handleUserJoined);
       socket.off("existing-video-peers", handleExistingPeers);
+      socket.off("request-media-status", handleRequestMediaStatus);
       socket.off("video-offer",          handleOffer);
       socket.off("video-answer",         handleAnswer);
       socket.off("ice-candidate",        handleIce);
@@ -267,25 +316,50 @@ export default function useWebRTC(socket, roomId, userName, localStream) {
   }, [socket, roomId, createPeerConnection, removePeer]);
 
   // ── HOT-SWAP TRACKS ───────────────────────────────────────────────────────
-  // Because we seeded the PC with dummy tracks, every target sender already exists!
+  // Replaces the track on our pre-warmed transceivers instantly
   
   useEffect(() => {
     const syncTracks = async () => {
-      const dummy = getDummyStream();
-      const realAudio = localStream?.getAudioTracks()[0] || dummy.getAudioTracks()[0];
-      const realVideo = localStream?.getVideoTracks()[0] || dummy.getVideoTracks()[0];
+      const realAudio = localStream?.getAudioTracks()[0] || null;
+      const realVideo = localStream?.getVideoTracks()[0] || null;
 
       for (const [peerId, pc] of peersRef.current.entries()) {
         if (pc.signalingState === "closed") continue;
 
-        pc.getSenders().forEach(sender => {
-          if (sender.track?.kind === "audio" && sender.track !== realAudio) {
-            sender.replaceTrack(realAudio).catch(e => console.warn(e));
+        let changed = false;
+        pc.getTransceivers().forEach(tc => {
+          if (tc.receiver.track.kind === "audio") {
+            if (tc.sender.track !== realAudio) {
+              tc.sender.replaceTrack(realAudio).catch(e => console.error(e));
+              changed = true;
+            }
           }
-          if (sender.track?.kind === "video" && sender.track !== realVideo) {
-            sender.replaceTrack(realVideo).catch(e => console.warn(e));
+          if (tc.receiver.track.kind === "video") {
+            if (tc.sender.track !== realVideo) {
+              tc.sender.replaceTrack(realVideo).catch(e => console.error(e));
+              changed = true;
+            }
           }
         });
+
+        // CRITICAL FIX: Chrome and Safari often freeze the byte pipeline when 
+        // replaceTrack swaps a null track for a live track because the SSRC changes.
+        // We MUST manually force an SDP renegotiation to update the packet decoders!
+        if (changed && pc.signalingState === "stable") {
+          try {
+            makingOffer.current.set(peerId, true);
+            await pc.setLocalDescription(); 
+            socketRef.current?.emit("video-offer", {
+              roomId: roomIdRef.current,
+              offer:  pc.localDescription,
+              to:     peerId,
+            });
+          } catch (e) {
+            console.error("[WebRTC] explicit renegotiation error:", e);
+          } finally {
+            makingOffer.current.set(peerId, false);
+          }
+        }
       }
     };
     syncTracks();
@@ -294,8 +368,8 @@ export default function useWebRTC(socket, roomId, userName, localStream) {
   // Broadcast status whenever localStream changes
   useEffect(() => {
     if (!socket || !roomId) return;
-    const isMicOn = localStream?.getAudioTracks().length > 0 ?? false;
-    const isCameraOn = localStream?.getVideoTracks().length > 0 ?? false;
+    const isMicOn = localStream?.getAudioTracks().some(t => t.enabled && t.readyState === 'live') ?? false;
+    const isCameraOn = localStream?.getVideoTracks().some(t => t.enabled && t.readyState === 'live') ?? false;
     socket.emit("media-status-changed", { roomId, isMicOn, isCameraOn });
     
     // Also update our OWN status immediately in the UI (prevents delays)
@@ -305,10 +379,29 @@ export default function useWebRTC(socket, roomId, userName, localStream) {
   // ── expose map ────────────────────────────────────────────────────────────
 
   const remoteParticipants = new Map();
+  
+  // Combine streams and statuses
   remoteStreams.forEach((streamData, peerId) => {
+    if (peerId === "local") return;
+    
     const status = peerStatuses.get(peerId) || { isMicOn: false, isCameraOn: false };
+    
     remoteParticipants.set(peerId, {
-      stream:     streamData.stream,
+      stream:     streamData?.stream || null,
+      userName:   streamData?.userName || "Participant",
+      isMicOn:    status.isMicOn,
+      isCameraOn: status.isCameraOn,
+    });
+  });
+  
+  // Also include peers that have status but no stream yet
+  peerStatuses.forEach((status, peerId) => {
+    if (peerId === "local" || remoteParticipants.has(peerId)) return;
+    
+    const streamData = remoteStreams.get(peerId);
+    remoteParticipants.set(peerId, {
+      stream:     null,
+      userName:   streamData?.userName || "Participant",
       isMicOn:    status.isMicOn,
       isCameraOn: status.isCameraOn,
     });

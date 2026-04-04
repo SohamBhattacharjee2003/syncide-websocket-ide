@@ -2,7 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import LandingPage from "../features/landing/pages/LandingPage";
 import AuthPage from "../features/auth/pages/AuthPage";
 import DashboardPage from "../features/dashboard/pages/DashboardPage";
-import EditorPage from "../features/editor/pages/EditorPageNew";
+import EditorPage from "../features/editor/pages/EditorPage";
 import PlainEditorPage from "../features/editor/pages/PlainEditorPage";
 import AccountPage from "../features/auth/pages/AccountPage";
 import SettingsPage from "../features/auth/pages/SettingsPage";
