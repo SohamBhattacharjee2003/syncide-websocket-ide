@@ -189,19 +189,20 @@ function setupSocket(io) {
         };
       });
 
-      console.log(`[Video] Sending ${existingPeersData.length} existing peers to ${socket.id}`);
+      console.log(`[Video] Sending ${existingPeersData.length} existing peers to ${socket.id}:`, existingPeersData);
       socket.emit("existing-video-peers", existingPeersData);
+
+      // Add this socket to video call participants BEFORE notifying others
+      peers.add(socket.id);
 
       // Notify existing peers about the new joiner
       existingPeerIds.forEach((peerId) => {
+        console.log(`[Video] Notifying ${peerId} about new joiner ${socket.id}`);
         io.to(peerId).emit("user-joined-video", {
           peerId: socket.id,
           userName,
         });
       });
-
-      // Add this socket to video call participants
-      peers.add(socket.id);
 
       // Update hasVideo flag in room participants
       if (roomParticipants[normalizedRoomId]) {
@@ -212,22 +213,22 @@ function setupSocket(io) {
         }
       }
 
-      // Request media status from all existing peers
-      socket.to(normalizedRoomId).emit("request-media-status", { from: socket.id });
-
       console.log(`[Video] Room ${normalizedRoomId} now has ${peers.size} video participants`);
     });
 
     // ── VIDEO CALL: SIGNALING ────────────────────────────────────────────────
     socket.on("video-offer", ({ roomId, offer, to }) => {
+      console.log(`[Signaling] Forwarding offer from ${socket.id} to ${to}`);
       io.to(to).emit("video-offer", { offer, from: socket.id });
     });
 
     socket.on("video-answer", ({ roomId, answer, to }) => {
+      console.log(`[Signaling] Forwarding answer from ${socket.id} to ${to}`);
       io.to(to).emit("video-answer", { answer, from: socket.id });
     });
 
     socket.on("ice-candidate", ({ roomId, candidate, to }) => {
+      console.log(`[Signaling] Forwarding ICE candidate from ${socket.id} to ${to}`);
       io.to(to).emit("ice-candidate", { candidate, from: socket.id });
     });
 
