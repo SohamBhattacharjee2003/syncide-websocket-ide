@@ -283,8 +283,13 @@ function ParticipantTile({ stream, name, isLocal, isMuted, isCameraOff, isHost, 
   const videoRef = useRef(null);
 
   useEffect(() => {
-    console.log(`[ParticipantTile] ${name}: stream=${!!stream}, isCameraOff=${isCameraOff}, tracks=${stream?.getTracks().length}`);
-    if (videoRef.current && stream) {
+    // Validate stream is a MediaStream object
+    const isValidStream = stream && stream instanceof MediaStream;
+    const trackCount = isValidStream ? stream.getTracks().length : 0;
+    
+    console.log(`[ParticipantTile] ${name}: stream=${!!stream}, isValidStream=${isValidStream}, isCameraOff=${isCameraOff}, tracks=${trackCount}`);
+    
+    if (videoRef.current && isValidStream) {
       console.log(`[ParticipantTile] Setting srcObject for ${name}`);
       videoRef.current.srcObject = stream;
     }
@@ -307,7 +312,7 @@ function ParticipantTile({ stream, name, isLocal, isMuted, isCameraOff, isHost, 
       className="relative aspect-video rounded-xl overflow-hidden bg-[#3c4043] group"
     >
       {/* Video or Avatar */}
-      {stream && !isCameraOff ? (
+      {stream && stream instanceof MediaStream && !isCameraOff ? (
         <video
           ref={videoRef}
           autoPlay
