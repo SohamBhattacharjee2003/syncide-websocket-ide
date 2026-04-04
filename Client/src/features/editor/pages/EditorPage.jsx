@@ -257,6 +257,25 @@ export default function EditorPage() {
     leaveCall,
     cleanup: cleanupWebRTC,
   } = useWebRTC({ socket, roomId, userName, localStream });
+  
+  // DEVELOPMENT MODE: Enable loopback for same-device testing
+  const isDevelopmentMode = import.meta.env.DEV;
+  const [showLoopback, setShowLoopback] = useState(false);
+  
+  // Create fake remote stream for testing on same device
+  const fakeRemoteStreams = new Map();
+  if (isDevelopmentMode && showLoopback && localStream) {
+    // Add a fake remote participant with your own stream
+    fakeRemoteStreams.set('fake-peer-1', {
+      stream: localStream,
+      userName: 'Test User (Loopback)',
+      isMicOn: isMicOn,
+      isCameraOn: isCameraOn,
+    });
+  }
+  
+  // Merge real and fake streams
+  const displayStreams = new Map([...remoteStreams, ...fakeRemoteStreams]);
 
   // Auto-start video call when user joins room - DISABLED, now triggered by backend
   // useEffect(() => {
@@ -506,6 +525,24 @@ export default function EditorPage() {
         onToggleVideoCall={handleToggleVideoCall}
         user={user}
       />
+      
+      {/* Development Mode: Loopback Toggle */}
+      {isDevelopmentMode && (
+        <div className="fixed bottom-4 left-4 z-50">
+          <motion.button
+            onClick={() => setShowLoopback(!showLoopback)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              showLoopback 
+                ? 'bg-emerald-500 text-white' 
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            {showLoopback ? '🔄 Loopback ON' : '🔄 Loopback OFF'}
+          </motion.button>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden relative z-10">
@@ -545,7 +582,7 @@ export default function EditorPage() {
                 isOpen={isVideoPanelOpen}
                 onToggle={() => setIsVideoPanelOpen(!isVideoPanelOpen)}
                 localStream={localStream}
-                remoteStreams={remoteStreams}
+                remoteStreams={displayStreams}
                 peerStatuses={peerStatuses}
                 isCameraOn={isCameraOn}
                 isMicOn={isMicOn}
@@ -636,7 +673,7 @@ export default function EditorPage() {
           onClose={() => setShowVideoCall(false)}
           localStream={localStream}
           screenStream={screenStream}
-          remoteStreams={remoteStreams}
+          remoteStreams={displayStreams}
           isCameraOn={isCameraOn}
           isMicOn={isMicOn}
           isScreenSharing={isScreenSharing}
