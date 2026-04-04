@@ -285,17 +285,39 @@ export default function EditorPage() {
 
   // Cleanup on page unload/reload
   useEffect(() => {
-    const handleBeforeUnload = () => {
+    const handleBeforeUnload = (e) => {
+      console.log('[EditorPage] Page unloading, cleaning up...');
       if (isInCall) {
+        // Don't actually leave - just cleanup local resources
         stopAll();
-        cleanupWebRTC();
-        socket.emit("leave-video-call", { roomId, userName });
+        // Don't emit leave-video-call on reload, only on actual close
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        console.log('[EditorPage] Page hidden');
+      } else {
+        console.log('[EditorPage] Page visible, checking call state');
+        // Rejoin if needed
+        if (isInCall && !localStream) {
+          console.log('[EditorPage] Rejoining call after visibility change');
+          setTimeout(() => {
+            toggleCamera();
+            toggleMic();
+          }, 500);
+        }
       }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [isInCall, roomId, userName, stopAll, cleanupWebRTC]);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isInCall, localStream, stopAll, toggleCamera, toggleMic]);
 
   // Broadcast media status whenever it changes
   useEffect(() => {

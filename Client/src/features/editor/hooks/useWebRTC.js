@@ -228,6 +228,14 @@ export default function useWebRTC({ socket, roomId, userName, localStream }) {
         if (videoTrack) {
           pc.addTrack(videoTrack, currentStream);
         }
+        
+        // Force negotiation after adding tracks
+        console.log(`[WebRTC] Triggering negotiation for ${peerId}`);
+        setTimeout(() => {
+          if (pc.signalingState === 'stable') {
+            pc.dispatchEvent(new Event('negotiationneeded'));
+          }
+        }, 100);
       }
 
       // Broadcast current media status to the new joiner
@@ -266,6 +274,14 @@ export default function useWebRTC({ socket, roomId, userName, localStream }) {
           if (videoTrack) {
             pc.addTrack(videoTrack, currentStream);
           }
+          
+          // Force negotiation after adding tracks
+          console.log(`[WebRTC] Triggering negotiation for ${peerId}`);
+          setTimeout(() => {
+            if (pc.signalingState === 'stable') {
+              pc.dispatchEvent(new Event('negotiationneeded'));
+            }
+          }, 100);
         }
       });
     };
