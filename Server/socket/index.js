@@ -2,29 +2,90 @@ const { spawn } = require("child_process");
 const os = require("os");
 const Room = require("../models/Room");
 
-// Track participants in memory
-const roomParticipants = {};
-const roomHosts = {};
-// Track which socket IDs are in each room's video call
-const videoRooms = new Map();
-// Track terminal sessions per socket
-const terminalSessions = {};
+// UNIFIED PARTICIPANT TRACKING - Single source of truth
+const roomParticipants = {}; // { roomId: [{ id, name, initials, color, isHost, hasVideo }] }
+const roomHosts = {}; // { roomId: socketId }
+const videoCallParticipants = {}; // { roomId: Set<socketId> }
+const terminalSessions = {}; // { socketId: process }
+
+// Helper: Clean stale participants from a room
+function cleanStaleParticipants(io, roomId) {
+  if (!roomParticipants[roomId]) return;
+  
+  const socketsInRoom = io.sockets.adapter.rooms.get(roomId) || new Set();
+  const before = roomParticipants[roomId].length;
+  
+  roomParticipants[roomId] = roomParticipants[roomId].filter((u) => {
+    const isActive = socketsInRoom.has(u.id);
+    if (!isActive) {
+      console.log(`[Clean] Removing stale participant ${u.name} (${u.id}) from room ${roomId}`);
+    }
+    return isActive;
+  });
+  
+  const after = roomParticipants[roomId].length;
+  if (before !== after) {
+    console.log(`[Clean] Room ${roomId}: Cleaned ${before - after} stale participants`);
+  }
+}
+
+// Helper: Assign or reassign host
+function assignHost(io, roomId) {
+  if (!roomParticipants[roomId] || roomParticipants[roomId].length === 0) {
+    delete roomHosts[roomId];
+    console.log(`[Host] Room ${roomId}: No participants, cleared host`);
+    return;
+  }
+  
+  const currentHost = roomHosts[roomId];
+  const socketsInRoom = io.sockets.adapter.rooms.get(roomId) || new Set();
+  
+  // Check if current host is still valid
+  if (currentHost && socketsInRoom.has(currentHost)) {
+    console.log(`[Host] Room ${roomId}: Host ${currentHost} still valid`);
+    return;
+  }
+  
+  // Assign first participant as host
+  const newHost = roomParticipants[roomId][0];
+  roomHosts[roomId] = newHost.id;
+  console.log(`[Host] Room ${roomId}: Assigned ${newHost.name} (${newHost.id}) as host`);
+}
+
+// Helper: Update host flags on all participants
+function updateHostFlags(roomId) {
+  if (!roomParticipants[roomId]) return;
+  
+  const hostId = roomHosts[roomId];
+  roomParticipants[roomId] = roomParticipants[roomId].map((u) => ({
+    ...u,
+    isHost: u.id === hostId,
+    color: u.id === hostId ? "#f59e0b" : "#10b981",
+  }));
+}
+
+// Helper: Broadcast updated participant list
+function broadcastParticipants(io, roomId) {
+  if (!roomParticipants[roomId]) return;
+  
+  console.log(`[Broadcast] Room ${roomId}: Sending ${roomParticipants[roomId].length} participants`);
+  io.to(roomId).emit("room-users", roomParticipants[roomId]);
+}
 
 function setupSocket(io) {
   io.on("connection", (socket) => {
-    console.log("User connected:", socket.id);
+    console.log(`[Connection] User connected: ${socket.id}`);
 
-    // ── Join room ────────────────────────────────────────────────────────────
+    // ── JOIN ROOM ────────────────────────────────────────────────────────────
     socket.on("join-room", async (roomId, userNameParam) => {
-      socket.join(roomId);
-      const normalizedRoomId = roomId.toString();
-      roomId = normalizedRoomId;
+      const normalizedRoomId = roomId.toString().toUpperCase();
+      const userName = userNameParam || `User-${socket.id.slice(-4)}`;
 
-      let userName = userNameParam || socket.handshake.query?.username || `User-${socket.id.slice(-4)}`;
+      console.log(`[Join] ${userName} (${socket.id}) joining room ${normalizedRoomId}`);
 
-      // Check if room exists in DB, create if not
+      // Load or create room in database
       let room = await Room.findOneAndUpdate(
-        { roomId },
+        { roomId: roomId.toString() },
         {
           $setOnInsert: {
             code: `// JavaScript – SyncIDE\n// Author: ${userName}\n// Date: ${new Date().toLocaleDateString()}\n\nfunction main() {\n  console.log("Hello, SyncIDE!");\n}\n\nmain();`,
@@ -33,159 +94,250 @@ function setupSocket(io) {
         { upsert: true, new: true }
       );
 
-      if (!roomParticipants[roomId]) roomParticipants[roomId] = [];
+      // Join Socket.IO room
+      socket.join(normalizedRoomId);
 
-      // Deduplicate participants
-      const existingUser = roomParticipants[roomId].find((u) => u.id === socket.id);
-      if (existingUser) {
-        existingUser.name = userName;
-        existingUser.initials = userName.split(" ").map((s) => s[0]).join("").toUpperCase().slice(0, 2);
+      // Initialize room participants array if needed
+      if (!roomParticipants[normalizedRoomId]) {
+        roomParticipants[normalizedRoomId] = [];
+      }
+
+      // Clean stale participants BEFORE adding new one
+      cleanStaleParticipants(io, normalizedRoomId);
+
+      // Check if this socket is already in the room (reconnection)
+      const existingIndex = roomParticipants[normalizedRoomId].findIndex((u) => u.id === socket.id);
+      
+      if (existingIndex >= 0) {
+        // Update existing participant
+        console.log(`[Join] Updating existing participant ${socket.id}`);
+        roomParticipants[normalizedRoomId][existingIndex].name = userName;
+        roomParticipants[normalizedRoomId][existingIndex].initials = userName
+          .split(" ")
+          .map((s) => s[0])
+          .join("")
+          .toUpperCase()
+          .slice(0, 2);
       } else {
-        roomParticipants[roomId].push({
+        // Add new participant
+        console.log(`[Join] Adding new participant ${socket.id} (${userName})`);
+        roomParticipants[normalizedRoomId].push({
           id: socket.id,
           name: userName,
           initials: userName.split(" ").map((s) => s[0]).join("").toUpperCase().slice(0, 2),
           color: "#10b981",
           isHost: false,
-          isYou: false,
           hasVideo: false,
         });
       }
 
-      // Remove stale participants
-      const socketsInRoom = io.sockets.adapter.rooms.get(roomId) || new Set();
-      roomParticipants[roomId] = roomParticipants[roomId].filter((u) =>
-        socketsInRoom.has(u.id)
-      );
+      // Assign host if needed
+      assignHost(io, normalizedRoomId);
 
-      // Assign host
-      if (!roomHosts[roomId] || !roomParticipants[roomId].some((u) => u.name === roomHosts[roomId])) {
-        roomHosts[roomId] = userName;
+      // Update host flags
+      updateHostFlags(normalizedRoomId);
+
+      // Send current code to new joiner
+      if (room) {
+        socket.emit("code-update", room.code);
       }
-      roomParticipants[roomId] = roomParticipants[roomId].map((u) =>
-        u.name === roomHosts[roomId]
-          ? { ...u, isHost: true, color: "#f59e0b" }
-          : { ...u, isHost: false, color: "#10b981" }
-      );
 
-      if (room) socket.emit("code-update", room.code);
-      io.to(roomId).emit("room-users", roomParticipants[roomId]);
+      // Broadcast updated participant list
+      broadcastParticipants(io, normalizedRoomId);
+
+      console.log(`[Join] Room ${normalizedRoomId} now has ${roomParticipants[normalizedRoomId].length} participants`);
     });
 
-    // ── Code sync ────────────────────────────────────────────────────────────
+    // ── CODE SYNC ────────────────────────────────────────────────────────────
     socket.on("code-change", async ({ roomId, code }) => {
-      await Room.findOneAndUpdate({ roomId }, { code }, { upsert: true });
-      socket.to(roomId).emit("code-update", code);
+      const normalizedRoomId = roomId.toString().toUpperCase();
+      
+      // Save to database
+      await Room.findOneAndUpdate(
+        { roomId: roomId.toString() },
+        { code },
+        { upsert: true }
+      );
+      
+      // Broadcast to others in room
+      socket.to(normalizedRoomId).emit("code-update", code);
     });
 
-    // ── VIDEO CALL EVENTS ────────────────────────────────────────────────────
+    // ── VIDEO CALL: JOIN ─────────────────────────────────────────────────────
     socket.on("join-video-call", ({ roomId, userName }) => {
-      const room = roomId?.toString().toUpperCase();
-      if (!room) return;
-  
-      if (!videoRooms.has(room)) videoRooms.set(room, new Set());
-      const peers = videoRooms.get(room);
-  
-      // Tell the NEW joiner who's already in the room
-      const existingPeerIds = [...peers].filter(id => id !== socket.id);
-      socket.emit("existing-video-peers", existingPeerIds.map(peerId => ({ peerId })));
-  
-      // Tell EXISTING peers that someone new joined — send our socket.id as peerId
-      existingPeerIds.forEach(peerId => {
+      const normalizedRoomId = roomId?.toString().toUpperCase();
+      if (!normalizedRoomId) return;
+
+      console.log(`[Video] ${userName} (${socket.id}) joining video call in room ${normalizedRoomId}`);
+
+      // Initialize video call tracking for this room
+      if (!videoCallParticipants[normalizedRoomId]) {
+        videoCallParticipants[normalizedRoomId] = new Set();
+      }
+
+      const peers = videoCallParticipants[normalizedRoomId];
+
+      // Get list of existing peers (excluding this socket)
+      const existingPeerIds = [...peers].filter((id) => id !== socket.id);
+
+      // Send existing peers to the new joiner (with their names from roomParticipants)
+      const existingPeersData = existingPeerIds.map((peerId) => {
+        const participant = roomParticipants[normalizedRoomId]?.find((u) => u.id === peerId);
+        return {
+          peerId,
+          userName: participant?.name || "Participant",
+        };
+      });
+
+      console.log(`[Video] Sending ${existingPeersData.length} existing peers to ${socket.id}`);
+      socket.emit("existing-video-peers", existingPeersData);
+
+      // Notify existing peers about the new joiner
+      existingPeerIds.forEach((peerId) => {
         io.to(peerId).emit("user-joined-video", {
-          peerId:   socket.id,   // ← CRITICAL: this must be socket.id of the JOINER
+          peerId: socket.id,
           userName,
         });
       });
-  
-      // Now add ourselves to the room
+
+      // Add this socket to video call participants
       peers.add(socket.id);
-      socket.join(room);
-  
-      console.log(`[Video] ${userName} (${socket.id}) joined video in room ${room}. Peers: ${peers.size}`);
+
+      // Update hasVideo flag in room participants
+      if (roomParticipants[normalizedRoomId]) {
+        const participant = roomParticipants[normalizedRoomId].find((u) => u.id === socket.id);
+        if (participant) {
+          participant.hasVideo = true;
+          broadcastParticipants(io, normalizedRoomId);
+        }
+      }
+
+      // Request media status from all existing peers
+      socket.to(normalizedRoomId).emit("request-media-status", { from: socket.id });
+
+      console.log(`[Video] Room ${normalizedRoomId} now has ${peers.size} video participants`);
     });
-  
-    // Relay offer to specific peer, adding sender's socket.id as `from`
+
+    // ── VIDEO CALL: SIGNALING ────────────────────────────────────────────────
     socket.on("video-offer", ({ roomId, offer, to }) => {
       io.to(to).emit("video-offer", { offer, from: socket.id });
     });
-  
-    // Relay answer
+
     socket.on("video-answer", ({ roomId, answer, to }) => {
       io.to(to).emit("video-answer", { answer, from: socket.id });
     });
-  
-    // Relay ICE candidate
+
     socket.on("ice-candidate", ({ roomId, candidate, to }) => {
       io.to(to).emit("ice-candidate", { candidate, from: socket.id });
     });
-  
-    // Relay media status to everyone else in the room
+
+    // ── VIDEO CALL: MEDIA STATUS ─────────────────────────────────────────────
     socket.on("media-status-changed", ({ roomId, isMicOn, isCameraOn }) => {
-      const room = roomId?.toString().toUpperCase();
-      if (!room) return;
-      socket.to(room).emit("media-status-update", { peerId: socket.id, isMicOn, isCameraOn });
+      const normalizedRoomId = roomId?.toString().toUpperCase();
+      if (!normalizedRoomId) return;
+
+      console.log(`[Media] ${socket.id} status: mic=${isMicOn}, camera=${isCameraOn}`);
+      
+      // Broadcast to ALL participants in the room (including sender for confirmation)
+      io.to(normalizedRoomId).emit("media-status-update", {
+        peerId: socket.id,
+        isMicOn,
+        isCameraOn,
+      });
     });
-  
-    // Speaking state relay
+
     socket.on("speaking-state", ({ roomId, isSpeaking }) => {
-      const room = roomId?.toString().toUpperCase();
-      if (!room) return;
-      socket.to(room).emit("speaking-state", { peerId: socket.id, isSpeaking });
+      const normalizedRoomId = roomId?.toString().toUpperCase();
+      if (!normalizedRoomId) return;
+
+      socket.to(normalizedRoomId).emit("speaking-state", {
+        peerId: socket.id,
+        isSpeaking,
+      });
     });
-  
-    // Screen share events
+
+    // Handle media status request
+    socket.on("request-media-status", ({ roomId }) => {
+      const normalizedRoomId = roomId?.toString().toUpperCase();
+      if (!normalizedRoomId) return;
+      socket.to(normalizedRoomId).emit("request-media-status", { from: socket.id });
+    });
+
+    // ── VIDEO CALL: SCREEN SHARE ─────────────────────────────────────────────
     socket.on("screen-share-started", ({ roomId, userName }) => {
-      const room = roomId?.toString().toUpperCase();
-      if (!room) return;
-      socket.to(room).emit("screen-share-started", { peerId: socket.id, userName });
+      const normalizedRoomId = roomId?.toString().toUpperCase();
+      if (!normalizedRoomId) return;
+
+      socket.to(normalizedRoomId).emit("screen-share-started", {
+        peerId: socket.id,
+        userName,
+      });
     });
-  
+
     socket.on("screen-share-stopped", ({ roomId, userName }) => {
-      const room = roomId?.toString().toUpperCase();
-      if (!room) return;
-      socket.to(room).emit("screen-share-stopped", { peerId: socket.id, userName });
-    });
-  
-    socket.on("chat-message", ({ roomId, message }) => {
-      socket.to(roomId).emit("chat-message", message);
+      const normalizedRoomId = roomId?.toString().toUpperCase();
+      if (!normalizedRoomId) return;
+
+      socket.to(normalizedRoomId).emit("screen-share-stopped", {
+        peerId: socket.id,
+        userName,
+      });
     });
 
+    // ── VIDEO CALL: LEAVE ────────────────────────────────────────────────────
     socket.on("leave-video-call", ({ roomId, userName }) => {
-      const room = roomId?.toString().toUpperCase();
-      if (!room) return;
-      const peers = videoRooms.get(room);
-      if (peers) {
-        peers.delete(socket.id);
-        if (peers.size === 0) videoRooms.delete(room);
+      const normalizedRoomId = roomId?.toString().toUpperCase();
+      if (!normalizedRoomId) return;
+
+      console.log(`[Video] ${userName} (${socket.id}) leaving video call in room ${normalizedRoomId}`);
+
+      if (videoCallParticipants[normalizedRoomId]) {
+        videoCallParticipants[normalizedRoomId].delete(socket.id);
+
+        // Clean up empty video room
+        if (videoCallParticipants[normalizedRoomId].size === 0) {
+          delete videoCallParticipants[normalizedRoomId];
+        }
       }
-      socket.to(room).emit("user-left-video", { peerId: socket.id, userName });
-      console.log(`[Video] ${userName} (${socket.id}) left video in room ${room}`);
-    });
-  
-    // Host ends the session — removes all participants and notifies everyone
-    socket.on("end-session", ({ roomId }) => {
-      const roomStr = roomId?.toString().toUpperCase();
-      const room = roomParticipants[roomId] || [];
-      const sender = room.find(u => u.id === socket.id);
-      if (sender?.isHost) {
-        io.to(roomId).emit("session-ended"); // notify all clients including sender
-        // Clean up room state
-        delete roomParticipants[roomId];
-        delete roomHosts[roomId];
-        if (roomStr) videoRooms.delete(roomStr);
+
+      // Update hasVideo flag
+      if (roomParticipants[normalizedRoomId]) {
+        const participant = roomParticipants[normalizedRoomId].find((u) => u.id === socket.id);
+        if (participant) {
+          participant.hasVideo = false;
+          broadcastParticipants(io, normalizedRoomId);
+        }
       }
+
+      // Notify others
+      socket.to(normalizedRoomId).emit("user-left-video", {
+        peerId: socket.id,
+        userName,
+      });
     });
 
+    // ── CHAT ─────────────────────────────────────────────────────────────────
+    socket.on("chat-message", ({ roomId, message }) => {
+      const normalizedRoomId = roomId.toString().toUpperCase();
+      socket.to(normalizedRoomId).emit("chat-message", message);
+    });
+
+    // ── CURSOR SYNC ──────────────────────────────────────────────────────────
     socket.on("cursor-move", ({ roomId, position }) => {
-      socket.to(roomId).emit("cursor-move", { peerId: socket.id, position });
+      const normalizedRoomId = roomId.toString().toUpperCase();
+      socket.to(normalizedRoomId).emit("cursor-move", {
+        peerId: socket.id,
+        position,
+      });
     });
 
-    // ── INTERACTIVE TERMINAL ─────────────────────────────────────────────────
-    socket.on("terminal-start", ({ roomId }) => {
+    // ── TERMINAL ─────────────────────────────────────────────────────────────
+    socket.on("terminal-start", () => {
       // Kill existing session if any
       if (terminalSessions[socket.id]) {
-        try { terminalSessions[socket.id].kill(); } catch (e) {}
+        try {
+          terminalSessions[socket.id].kill();
+        } catch (e) {}
         delete terminalSessions[socket.id];
       }
 
@@ -209,20 +361,26 @@ function setupSocket(io) {
         });
 
         proc.on("close", (code) => {
-          socket.emit("terminal-output", { data: `\r\n[Process exited with code ${code}]\r\n` });
+          socket.emit("terminal-output", {
+            data: `\r\n[Process exited with code ${code}]\r\n`,
+          });
           socket.emit("terminal-closed");
           delete terminalSessions[socket.id];
         });
 
         proc.on("error", (err) => {
-          socket.emit("terminal-output", { data: `\r\n[Terminal error: ${err.message}]\r\n` });
+          socket.emit("terminal-output", {
+            data: `\r\n[Terminal error: ${err.message}]\r\n`,
+          });
           delete terminalSessions[socket.id];
         });
 
         socket.emit("terminal-ready");
-        console.log(`[Terminal] Started shell for socket ${socket.id}`);
+        console.log(`[Terminal] Started for ${socket.id}`);
       } catch (err) {
-        socket.emit("terminal-output", { data: `\r\n[Failed to start terminal: ${err.message}]\r\n` });
+        socket.emit("terminal-output", {
+          data: `\r\n[Failed to start terminal: ${err.message}]\r\n`,
+        });
       }
     });
 
@@ -234,77 +392,140 @@ function setupSocket(io) {
     });
 
     socket.on("terminal-resize", ({ cols, rows }) => {
-      // node-pty resize support — skip gracefully if not available
       const proc = terminalSessions[socket.id];
       if (proc && proc.resize) {
-        try { proc.resize(cols, rows); } catch (e) {}
+        try {
+          proc.resize(cols, rows);
+        } catch (e) {}
       }
     });
 
     socket.on("terminal-stop", () => {
       const proc = terminalSessions[socket.id];
       if (proc) {
-        try { proc.kill(); } catch (e) {}
+        try {
+          proc.kill();
+        } catch (e) {}
         delete terminalSessions[socket.id];
+      }
+    });
+
+    // ── HOST: END SESSION ────────────────────────────────────────────────────
+    socket.on("end-session", ({ roomId }) => {
+      const normalizedRoomId = roomId?.toString().toUpperCase();
+      if (!normalizedRoomId) return;
+
+      // Check if sender is the host
+      if (roomHosts[normalizedRoomId] === socket.id) {
+        console.log(`[Host] ${socket.id} ending session for room ${normalizedRoomId}`);
+        
+        // Notify all clients
+        io.to(normalizedRoomId).emit("session-ended");
+        
+        // Clean up room state
+        delete roomParticipants[normalizedRoomId];
+        delete roomHosts[normalizedRoomId];
+        delete videoCallParticipants[normalizedRoomId];
+      } else {
+        console.warn(`[Host] Non-host ${socket.id} attempted to end session in room ${normalizedRoomId}`);
       }
     });
 
     // ── LEAVE ROOM ───────────────────────────────────────────────────────────
     socket.on("leave-room", (roomId) => {
-      socket.leave(roomId);
-      if (roomParticipants[roomId]) {
-        roomParticipants[roomId] = roomParticipants[roomId].filter((u) => u.id !== socket.id);
-        const socketsInRoom = io.sockets.adapter.rooms.get(roomId) || new Set();
-        roomParticipants[roomId] = roomParticipants[roomId].filter((u) => socketsInRoom.has(u.id));
+      const normalizedRoomId = roomId.toString().toUpperCase();
+      
+      console.log(`[Leave] ${socket.id} leaving room ${normalizedRoomId}`);
+      
+      socket.leave(normalizedRoomId);
 
-        if (roomHosts[roomId] && !roomParticipants[roomId].some((u) => u.name === roomHosts[roomId])) {
-          roomHosts[roomId] = roomParticipants[roomId][0]?.name || null;
-        }
-        roomParticipants[roomId] = roomParticipants[roomId].map((u) =>
-          u.name === roomHosts[roomId]
-            ? { ...u, isHost: true, color: "#f59e0b" }
-            : { ...u, isHost: false, color: "#10b981" }
+      // Remove from participants
+      if (roomParticipants[normalizedRoomId]) {
+        roomParticipants[normalizedRoomId] = roomParticipants[normalizedRoomId].filter(
+          (u) => u.id !== socket.id
         );
-        io.to(roomId).emit("room-users", roomParticipants[roomId]);
+
+        // Clean stale participants
+        cleanStaleParticipants(io, normalizedRoomId);
+
+        // Reassign host if needed
+        assignHost(io, normalizedRoomId);
+
+        // Update host flags
+        updateHostFlags(normalizedRoomId);
+
+        // Broadcast updated list
+        broadcastParticipants(io, normalizedRoomId);
       }
-      socket.to(roomId).emit("user-left", { peerId: socket.id });
+
+      // Remove from video call
+      if (videoCallParticipants[normalizedRoomId]) {
+        videoCallParticipants[normalizedRoomId].delete(socket.id);
+        if (videoCallParticipants[normalizedRoomId].size === 0) {
+          delete videoCallParticipants[normalizedRoomId];
+        }
+      }
+
+      // Notify others
+      socket.to(normalizedRoomId).emit("user-left", { peerId: socket.id });
     });
 
     // ── DISCONNECT ───────────────────────────────────────────────────────────
     socket.on("disconnect", () => {
-      console.log("User disconnected:", socket.id);
+      console.log(`[Disconnect] User disconnected: ${socket.id}`);
 
       // Kill terminal session
       if (terminalSessions[socket.id]) {
-        try { terminalSessions[socket.id].kill(); } catch (e) {}
+        try {
+          terminalSessions[socket.id].kill();
+        } catch (e) {}
         delete terminalSessions[socket.id];
       }
 
+      // Clean up from all rooms
       for (const roomId of socket.rooms) {
-      // Clean up video call tracking
-      for (const [room, peers] of videoRooms.entries()) {
-        if (peers.has(socket.id)) {
-          peers.delete(socket.id);
-          if (peers.size === 0) videoRooms.delete(room);
-          socket.to(room).emit("user-left-video", { peerId: socket.id });
-        }
-      }
-        if (roomParticipants[roomId]) {
-          roomParticipants[roomId] = roomParticipants[roomId].filter((u) => u.id !== socket.id);
-          const socketsInRoom = io.sockets.adapter.rooms.get(roomId) || new Set();
-          roomParticipants[roomId] = roomParticipants[roomId].filter((u) => socketsInRoom.has(u.id));
+        if (roomId === socket.id) continue; // Skip the socket's own room
 
-          if (roomHosts[roomId] && !roomParticipants[roomId].some((u) => u.name === roomHosts[roomId])) {
-            roomHosts[roomId] = roomParticipants[roomId][0]?.name || null;
-          }
-          roomParticipants[roomId] = roomParticipants[roomId].map((u) =>
-            u.name === roomHosts[roomId]
-              ? { ...u, isHost: true, color: "#f59e0b" }
-              : { ...u, isHost: false, color: "#10b981" }
+        // Remove from participants
+        if (roomParticipants[roomId]) {
+          const participant = roomParticipants[roomId].find((u) => u.id === socket.id);
+          const userName = participant?.name || "Unknown";
+
+          roomParticipants[roomId] = roomParticipants[roomId].filter(
+            (u) => u.id !== socket.id
           );
-          io.to(roomId).emit("room-users", roomParticipants[roomId]);
+
+          // Clean stale participants
+          cleanStaleParticipants(io, roomId);
+
+          // Reassign host if needed
+          assignHost(io, roomId);
+
+          // Update host flags
+          updateHostFlags(roomId);
+
+          // Broadcast updated list
+          broadcastParticipants(io, roomId);
+
+          // Notify about video call leave if they were in it
+          if (videoCallParticipants[roomId]?.has(socket.id)) {
+            socket.to(roomId).emit("user-left-video", {
+              peerId: socket.id,
+              userName,
+            });
+          }
         }
-        socket.to(roomId).emit("user-left-video", { peerId: socket.id });
+
+        // Remove from video call
+        if (videoCallParticipants[roomId]) {
+          videoCallParticipants[roomId].delete(socket.id);
+          if (videoCallParticipants[roomId].size === 0) {
+            delete videoCallParticipants[roomId];
+          }
+        }
+
+        // Notify others
+        socket.to(roomId).emit("user-left", { peerId: socket.id });
       }
     });
   });
