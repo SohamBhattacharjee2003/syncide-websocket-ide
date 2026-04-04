@@ -25,29 +25,28 @@ function EditorRedirect() {
   return <Navigate to={`/editor/${newRoomId}`} replace />;
 }
 
-// Auth route wrapper - redirects to dashboard if already logged in
+// Auth route wrapper — only /auth redirects logged-in users to dashboard
+// Landing page "/" does NOT redirect (user can view landing even when logged in)
 function AuthRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
-  
-  if (loading) {
-    return null;
-  }
-  
+
+  if (loading) return null;
+
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />;
   }
-  
+
   return children;
 }
 
 export default function AppRoutes() {
   return (
     <Routes>
-      {/* Public Routes */}
+      {/* Public Routes — accessible to everyone */}
       <Route path="/" element={<LandingPage />} />
       <Route path="/auth" element={<AuthRoute><AuthPage /></AuthRoute>} />
-      
-      {/* Protected Routes */}
+
+      {/* Protected Routes — require login */}
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
       <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />

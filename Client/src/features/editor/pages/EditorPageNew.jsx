@@ -77,7 +77,6 @@ import {
 
 // Chat
 import { FloatingChat } from "../components";
-import VideoTile from "../components/VideoTile";
 
 // ═══════════════════════════════════════════════════════════════
 // SYNCIDE - Professional Collaborative Code Editor
@@ -85,24 +84,28 @@ import VideoTile from "../components/VideoTile";
 
 
 import socket from "../../../shared/socket/socket";
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
+import JoinRoomModal from "../components/JoinRoomModal";
 import { useAuth } from "../../../shared/context/AuthContext";
-import useMediaStream from "../hooks/useMediaStream";
 import useWebRTC from "../hooks/useWebRTC";
-import useAudioLevel from "../hooks/useAudioLevel";
 
 export default function EditorPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
   const editorRef = useRef(null);
+  const { user } = useAuth();
 
   // File/Folder state
   const [files, setFiles] = useState([getInitialFile("javascript")]);
   const [folders, setFolders] = useState([]);
   const [activeFileId, setActiveFileId] = useState("1");
+  const activeFileIdRef = useRef("1"); // mutable ref for socket handler closure
   const [openTabs, setOpenTabs] = useState([{ id: "1", name: "main.js", language: "javascript", type: "file" }]);
   const [activeTabId, setActiveTabId] = useState("1");
   
+  // Keep ref in sync with state
+  useEffect(() => { activeFileIdRef.current = activeFileId; }, [activeFileId]);
+
   // Modal state
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
@@ -116,12 +119,15 @@ export default function EditorPage() {
   const [copied, setCopied] = useState(false);
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [terminalOutput, setTerminalOutput] = useState("Welcome to SyncIDE Terminal\n$ ");
-  const [terminalInput, setTerminalInput] = useState("");
-  const [terminalHistory, setTerminalHistory] = useState([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
   const [isExecuting, setIsExecuting] = useState(false);
   const [showChat, setShowChat] = useState(false);
-  const [chatUnread, setChatUnread] = useState(0);
+  const [isMicOn, setIsMicOn] = useState(false);
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [localStream, setLocalStream] = useState(null);
+  const [isInCall, setIsInCall] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const screenStreamRef = useRef(null);
+  const mediaStreamRef = useRef(null);
   const [activePanel, setActivePanel] = useState("explorer");
   const [contextMenu, setContextMenu] = useState({ show: false, x: 0, y: 0, item: null });
   const [showAccountMenu, setShowAccountMenu] = useState(false);
@@ -130,174 +136,99 @@ export default function EditorPage() {
   const [isSyncing, setIsSyncing] = useState(false);
   // Real-time participants state
   const [participants, setParticipants] = useState([]);
-  // Get username from auth context (logged-in user)
-  const { user: authUser } = useAuth();
-  const userName = authUser?.username || authUser?.name || localStorage.getItem("syncide-username") || "";
-
-  // WebRTC media hooks
-  const {
-    localStream,
-    screenStream,
-    localVideoRef,
-    isMicOn,
-    isCameraOn,
-    isScreenSharing,
-    toggleMic,
-    toggleCamera,
-    toggleScreenShare,
-    stopAll: stopMedia,
-  } = useMediaStream();
+  
+  // Username: prefer logged-in user, then localStorage, then show modal
+  const storedName = localStorage.getItem("syncide-username");
+  const defaultName = user?.username || user?.name || storedName || "";
+  const [userName, setUserName] = useState(defaultName);
+  const [showJoinModal, setShowJoinModal] = useState(!defaultName);
 
   const normalizedRoomId = roomId ? roomId.toUpperCase() : roomId;
-  const { remoteStreams, joinCall, leaveCall } = useWebRTC(socket, normalizedRoomId, userName, localStream, screenStream);
 
-  // Audio level detection — shows who is speaking
-  const { isSpeaking: localSpeaking, audioLevel: localAudioLevel } = useAudioLevel(localStream);
+  // WebRTC hook — peer connections, signaling, and remote video streams
+  const { joinCall, leaveCall, remoteStreams: remoteParticipantStreams } = useWebRTC(socket, normalizedRoomId, userName, localStream);
 
-  // Track remote speaking states
-  const [remoteSpeaking, setRemoteSpeaking] = useState({});
+  // Derive isHost from participants list
+  const isHost = participants.find(p => p.isYou)?.isHost || false;
 
-  // Emit local speaking state to all peers
+  // Join room and listen for participants + code sync + real-time events
+  // Only join after we have a userName
   useEffect(() => {
-    if (!normalizedRoomId) return;
-    socket.emit("speaking-state", { roomId: normalizedRoomId, isSpeaking: localSpeaking });
-  }, [localSpeaking, normalizedRoomId]);
-
-  // Listen for remote speaking state changes
-  useEffect(() => {
-    const handler = ({ peerId, isSpeaking }) => {
-      setRemoteSpeaking(prev => ({ ...prev, [peerId]: isSpeaking }));
-    };
-    socket.on("speaking-state", handler);
-    return () => socket.off("speaking-state", handler);
-  }, []);
-
-  const terminalInputRef = useRef(null);
-  const terminalEndRef = useRef(null);
-
-  // Join room and listen for participants — wait for auth name
-  useEffect(() => {
-    // Don't join until we have a real username from auth
-    if (!userName) return;
-
+    if (!userName) return; // wait for modal
+    const normalizedRoomId = roomId ? roomId.toUpperCase() : roomId;
     socket.emit("join-room", normalizedRoomId, userName);
-    socket.on("room-users", (userList) => {
+
+    // Use named handlers so we can cleanly remove exactly these listeners
+    const handleRoomUsers = (userList) => {
       const markedList = userList.map(u => ({
         ...u,
-        isYou: u.id === socket.id || u.name === userName,
+        isSpeaking: u.isSpeaking || false,
+        isYou: u.name === userName,
       }));
       const host = markedList.find(u => u.isHost);
       const others = markedList.filter(u => !u.isHost);
-      const sorted = host ? [host, ...others] : [...others];
-      setParticipants(sorted);
-    });
-    return () => {
-      socket.off("room-users");
-      leaveCall();
-      stopMedia();
+      setParticipants(host ? [host, ...others] : [...others]);
     };
-  }, [normalizedRoomId, userName]);
 
-  // ★ Join video call ONLY after localStream is ready (mic auto-acquired)
-  // This ensures peer connections always have audio tracks from the start.
-  const hasJoinedCallRef = useRef(false);
+    const handleCodeUpdate = (newCode) => {
+      setFiles(prev => prev.map(f =>
+        f.id === activeFileIdRef.current ? { ...f, content: newCode } : f
+      ));
+      setIsSyncing(true);
+      setTimeout(() => setIsSyncing(false), 500);
+    };
+
+    const handleSpeakingState = ({ peerId, isSpeaking }) => {
+      setParticipants(prev => prev.map(p =>
+        p.id === peerId ? { ...p, isSpeaking } : p
+      ));
+    };
+
+    const handleSessionEnded = () => {
+      mediaStreamRef.current?.getTracks().forEach(t => t.stop());
+      leaveCall();
+      navigate("/");
+    };
+
+    socket.on("room-users", handleRoomUsers);
+    socket.on("code-update", handleCodeUpdate);
+    socket.on("speaking-state", handleSpeakingState);
+    socket.on("session-ended", handleSessionEnded);
+
+    return () => {
+      socket.off("room-users", handleRoomUsers);
+      socket.off("code-update", handleCodeUpdate);
+      socket.off("speaking-state", handleSpeakingState);
+      socket.off("session-ended", handleSessionEnded);
+    };
+  }, [roomId, userName, leaveCall, navigate]);
+
+  // Speaking detection via Web Audio API
   useEffect(() => {
-    if (localStream && userName && !hasJoinedCallRef.current) {
-      hasJoinedCallRef.current = true;
-      joinCall();
-      console.log("[EditorPage] joined video call with localStream ready");
-    }
-  }, [localStream, userName, joinCall]);
-
-  // Auto-scroll terminal
-  useEffect(() => {
-    terminalEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [terminalOutput]);
-
-  // Interactive terminal submit
-  const handleTerminalSubmit = async (e) => {
-    e.preventDefault();
-    const cmd = terminalInput.trim();
-    if (!cmd) return;
-    setTerminalHistory((prev) => [...prev, cmd]);
-    setHistoryIndex(-1);
-    setTerminalInput("");
-    if (cmd === "clear") {
-      setTerminalOutput("$ ");
-      return;
-    }
-    setTerminalOutput((prev) => `${prev}${cmd}\n`);
-    setIsExecuting(true);
+    if (!localStream || !isMicOn) return;
+    let animFrameId;
+    let audioCtx;
     try {
-      const { executeAPI } = await import("../../../shared/services/api");
-      const result = await executeAPI.run(cmd, activeFile?.language || "javascript");
-      if (result.error && !result.output) {
-        setTerminalOutput((prev) => `${prev}❌ ${result.error}\n\n$ `);
-      } else {
-        const output = result.output || "(No output)";
-        const errorOutput = result.error ? `\n⚠️ ${result.error}` : "";
-        setTerminalOutput((prev) => `${prev}${output}${errorOutput}\n\n$ `);
-      }
-    } catch (err) {
-      setTerminalOutput((prev) => `${prev}❌ ${err.message}\n\n$ `);
-    } finally {
-      setIsExecuting(false);
-    }
-  };
-
-  const handleTerminalKeyDown = (e) => {
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      if (terminalHistory.length === 0) return;
-      const newIndex = historyIndex === -1 ? terminalHistory.length - 1 : Math.max(0, historyIndex - 1);
-      setHistoryIndex(newIndex);
-      setTerminalInput(terminalHistory[newIndex]);
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      if (historyIndex === -1) return;
-      const newIndex = historyIndex + 1;
-      if (newIndex >= terminalHistory.length) {
-        setHistoryIndex(-1);
-        setTerminalInput("");
-      } else {
-        setHistoryIndex(newIndex);
-        setTerminalInput(terminalHistory[newIndex]);
-      }
-    }
-  };
-
-  // ═══ Toast notification ═══
-  const [toast, setToast] = useState(null);
-  const showToast = (message, type = "warning") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  // ═══ Leave room properly ═══
-  const handleLeaveRoom = () => {
-    socket.emit("leave-room", normalizedRoomId);
-    leaveCall();
-    stopMedia();
-    navigate("/dashboard");
-  };
-
-  // ═══ Camera toggle with screen share check ═══
-  const handleCameraToggle = () => {
-    if (isScreenSharing) {
-      showToast("Stop screen sharing first to turn on camera", "warning");
-      return;
-    }
-    toggleCamera();
-  };
-
-  // ═══ Screen share toggle (stops camera if needed) ═══
-  const handleScreenShareToggle = async () => {
-    if (!isScreenSharing && isCameraOn) {
-      // Camera is on — stop camera, then start screen share
-      toggleCamera();
-    }
-    toggleScreenShare();
-  };
+      audioCtx = new AudioContext();
+      const source = audioCtx.createMediaStreamSource(localStream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const detect = () => {
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        socket.emit("speaking-state", { roomId: normalizedRoomId, isSpeaking: avg > 12 });
+        animFrameId = requestAnimationFrame(detect);
+      };
+      detect();
+    } catch (e) { console.warn("[Speaking] AudioContext error:", e); }
+    return () => {
+      cancelAnimationFrame(animFrameId);
+      audioCtx?.close();
+      socket.emit("speaking-state", { roomId: normalizedRoomId, isSpeaking: false });
+    };
+  }, [localStream, isMicOn, normalizedRoomId]);
 
   // Find file by ID
   const findFile = (id) => files.find(f => f.id === id);
@@ -345,10 +276,14 @@ export default function EditorPage() {
     }
   };
 
-  // Update file content
-  const updateContent = (content) => {
-    setFiles(files.map(f => f.id === activeFileId ? { ...f, content } : f));
-  };
+  // Update file content — also broadcasts to room collaborators
+  const updateContent = useCallback((content) => {
+    setFiles(prev => prev.map(f => f.id === activeFileId ? { ...f, content } : f));
+    const normalizedRoomId = roomId ? roomId.toUpperCase() : roomId;
+    socket.emit("code-change", { roomId: normalizedRoomId, code: content });
+    setIsSyncing(true);
+    setTimeout(() => setIsSyncing(false), 500);
+  }, [activeFileId, roomId]);
 
   // Create new file
   const createFile = (name, lang = selectedLanguage) => {
@@ -421,6 +356,159 @@ export default function EditorPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // ── MEDIA CONTROLS ───────────────────────────────────────────────────────
+  const toggleMic = async () => {
+    try {
+      if (isMicOn && localStream) {
+        // TURN OFF
+        localStream.getAudioTracks().forEach(t => t.stop());
+        const remaining = localStream.getVideoTracks();
+        const nextStream = remaining.length > 0 ? new MediaStream(remaining) : null;
+        mediaStreamRef.current = nextStream;
+        setLocalStream(nextStream);
+        setIsMicOn(false);
+        socket.emit("media-status-changed", { roomId: normalizedRoomId, isMicOn: false, isCameraOn });
+        return;
+      }
+
+      // TURN ON
+      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const audioTrack  = audioStream.getAudioTracks()[0];
+      let nextStream;
+      if (localStream) {
+        nextStream = new MediaStream([...localStream.getVideoTracks(), audioTrack]);
+      } else {
+        nextStream = new MediaStream([audioTrack]);
+      }
+      mediaStreamRef.current = nextStream;
+      setLocalStream(nextStream);
+      setIsMicOn(true);
+
+      if (!isInCall) {
+        setIsInCall(true);
+        setTimeout(joinCall, 150);
+      }
+      socket.emit("media-status-changed", { roomId: normalizedRoomId, isMicOn: true, isCameraOn });
+    } catch (err) {
+      console.error("[Media] Mic error:", err);
+      alert("Microphone access denied. Please allow microphone access in your browser settings.");
+    }
+  };
+
+  const toggleCamera = async () => {
+    try {
+      if (isCameraOn && localStream) {
+        // TURN OFF
+        localStream.getVideoTracks().forEach(t => t.stop());
+        const remaining = localStream.getAudioTracks();
+        const nextStream = remaining.length > 0 ? new MediaStream(remaining) : null;
+        mediaStreamRef.current = nextStream;
+        setLocalStream(nextStream);
+        setIsCameraOn(false);
+        socket.emit("media-status-changed", { roomId: normalizedRoomId, isMicOn, isCameraOn: false });
+        return;
+      }
+
+      // TURN ON
+      const camStream  = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      const videoTrack = camStream.getVideoTracks()[0];
+      let nextStream;
+      if (localStream) {
+        nextStream = new MediaStream([...localStream.getAudioTracks(), videoTrack]);
+      } else {
+        nextStream = new MediaStream([videoTrack]);
+      }
+      mediaStreamRef.current = nextStream;
+      setLocalStream(nextStream);
+      setIsCameraOn(true);
+
+      if (!isInCall) {
+        setIsInCall(true);
+        setTimeout(joinCall, 150);
+      }
+      socket.emit("media-status-changed", { roomId: normalizedRoomId, isMicOn, isCameraOn: true });
+    } catch (err) {
+      console.error("[Media] Camera error:", err);
+      alert("Camera access denied. Please allow camera access in your browser settings.");
+    }
+  };
+
+  const toggleScreenShare = async () => {
+    try {
+      if (isScreenSharing) {
+        // ── STOP screen share ──
+        screenStreamRef.current?.getTracks().forEach(t => t.stop());
+        screenStreamRef.current = null;
+        setIsScreenSharing(false);
+        socket.emit("screen-share-stopped", { roomId: normalizedRoomId, userName });
+
+        // Restore to audio-only (or null) — keep any mic track that was live
+        const audioTracks = localStream?.getAudioTracks() ?? [];
+        const nextStream  = audioTracks.length > 0 ? new MediaStream(audioTracks) : null;
+        mediaStreamRef.current = nextStream;
+        setLocalStream(nextStream);
+        setIsCameraOn(false);
+        return;
+      }
+
+      // ── START screen share ──
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      screenStreamRef.current = screenStream;
+
+      // Combine screen video with any live audio track
+      const combined = new MediaStream();
+      (localStream?.getAudioTracks() ?? []).forEach(t => combined.addTrack(t));
+      screenStream.getVideoTracks().forEach(t => combined.addTrack(t));
+
+      mediaStreamRef.current = combined;
+      setLocalStream(combined);
+      setIsScreenSharing(true);
+      setIsCameraOn(true); // screen counts as "video on"
+
+      if (!isInCall) {
+        setIsInCall(true);
+        setTimeout(joinCall, 150);
+      }
+      socket.emit("screen-share-started", { roomId: normalizedRoomId, userName });
+
+      // Auto-stop when the user hits the browser's "Stop sharing" button
+      screenStream.getVideoTracks()[0].onended = () => {
+        screenStreamRef.current = null;
+        setIsScreenSharing(false);
+        setIsCameraOn(false);
+        socket.emit("screen-share-stopped", { roomId: normalizedRoomId, userName });
+
+        const audio      = mediaStreamRef.current?.getAudioTracks() ?? [];
+        const nextStream = audio.length > 0 ? new MediaStream(audio) : null;
+        mediaStreamRef.current = nextStream;
+        setLocalStream(nextStream);
+      };
+    } catch (err) {
+      if (err.name !== "NotAllowedError") console.error("[Media] Screen share error:", err);
+    }
+  };
+
+  const handleHangUp = () => {
+    // Stop ALL tracks so the browser camera/mic LED turns off
+    mediaStreamRef.current?.getTracks().forEach(t => t.stop());
+    screenStreamRef.current?.getTracks().forEach(t => t.stop());
+    mediaStreamRef.current  = null;
+    screenStreamRef.current = null;
+
+    setLocalStream(null);
+    setIsMicOn(false);
+    setIsCameraOn(false);
+    setIsScreenSharing(false);
+    setIsInCall(false);
+
+    if (isHost) {
+      socket.emit("end-session", { roomId: normalizedRoomId });
+    }
+
+    leaveCall();
+    navigate("/");
+  };
+
   // Run code
   const runCode = async () => {
     if (!activeFile || isExecuting) return;
@@ -453,8 +541,8 @@ export default function EditorPage() {
         );
       }
     } catch (err) {
-      setTerminalOutput(prev =>
-        `${prev}❌ Failed to execute: ${err.message}\n\nMake sure the backend server is running\n\n$ `
+      setTerminalOutput(prev => 
+        `${prev}❌ Failed to execute: ${err.message}\n\nMake sure the backend server is running on http://localhost:5000\n\n$ `
       );
     } finally {
       setIsExecuting(false);
@@ -504,6 +592,28 @@ export default function EditorPage() {
     }
   };
 
+  // Handle join modal close
+  const handleJoinModalClose = (name) => {
+    if (name && name.trim()) {
+      localStorage.setItem("syncide-username", name.trim());
+      setUserName(name.trim());
+      setShowJoinModal(false);
+    }
+  };
+
+  // Stop all media tracks on unmount
+  useEffect(() => {
+    return () => {
+      mediaStreamRef.current?.getTracks().forEach(t => t.stop());
+      screenStreamRef.current?.getTracks().forEach(t => t.stop());
+    };
+  }, []);
+
+  // Show join modal if no username
+  if (showJoinModal) {
+    return <JoinRoomModal open={true} onClose={handleJoinModalClose} />;
+  }
+
   return (
     <div className="h-screen bg-[#0d0d0f] flex flex-col overflow-hidden text-sm" onClick={() => { setContextMenu({ show: false }); setShowLangDropdown(false); setShowAccountMenu(false); setShowNotifications(false); }}>
       
@@ -518,7 +628,7 @@ export default function EditorPage() {
             <motion.div 
               className="flex items-center gap-3 cursor-pointer group" 
               whileHover={{ scale: 1.02 }} 
-              onClick={handleLeaveRoom}
+              onClick={() => navigate("/")}
             >
               <div className="relative">
                 <motion.img
@@ -734,12 +844,19 @@ export default function EditorPage() {
               >
                 <div className="relative">
                   <div className="w-9 h-9 rounded-xl bg-linear-to-br from-emerald-400 via-cyan-500 to-blue-500 flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-emerald-500/20">
-                    {(userName || '?').slice(0, 2).toUpperCase()}
+                    {(user?.username || user?.name || userName || 'U')
+                      .split(' ')
+                      .map(w => w[0])
+                      .join('')
+                      .slice(0, 2)
+                      .toUpperCase()}
                   </div>
                   <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-400 rounded-full ring-2 ring-[#0f0f12]" />
                 </div>
                 <div className="hidden lg:flex flex-col items-start">
-                  <span className="text-sm font-semibold text-white">{userName || 'User'}</span>
+                  <span className="text-sm font-semibold text-white">
+                    {user?.username || user?.name || userName || 'User'}
+                  </span>
                   <span className="text-[10px] text-emerald-400 font-bold">✦ Pro</span>
                 </div>
                 <ChevronDownIcon />
@@ -758,11 +875,20 @@ export default function EditorPage() {
                     <div className="p-4 border-b border-white/5">
                       <div className="flex items-center gap-3">
                         <div className="w-12 h-12 rounded-xl bg-linear-to-br from-emerald-400 via-cyan-500 to-blue-500 flex items-center justify-center text-base font-bold text-white shadow-lg">
-                          {(userName || '?').slice(0, 2).toUpperCase()}
+                          {(user?.username || user?.name || userName || 'U')
+                            .split(' ')
+                            .map(w => w[0])
+                            .join('')
+                            .slice(0, 2)
+                            .toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-white truncate">{userName || 'User'}</p>
-                          <p className="text-xs text-white/40 truncate">{authUser?.email || ''}</p>
+                          <p className="text-sm font-bold text-white truncate">
+                            {user?.username || user?.name || userName || 'User'}
+                          </p>
+                          <p className="text-xs text-white/40 truncate">
+                            {user?.email || ''}
+                          </p>
                         </div>
                       </div>
                       <div className="mt-3 flex items-center gap-2">
@@ -789,7 +915,7 @@ export default function EditorPage() {
 
                     <div className="border-t border-white/5 p-2">
                       <button 
-                        onClick={handleLeaveRoom}
+                        onClick={() => navigate("/")}
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-red-400 hover:bg-red-500/10 transition-colors"
                       >
                         <LeaveIcon />
@@ -1063,28 +1189,12 @@ export default function EditorPage() {
                   </div>
                 </div>
                 {/* Terminal Output */}
-                <div className="flex-1 overflow-auto p-4 font-mono text-sm text-gray-300 whitespace-pre-wrap leading-relaxed bg-[#0a0a0c]" onClick={() => terminalInputRef.current?.focus()}>
+                <div className="flex-1 overflow-auto p-4 font-mono text-sm text-gray-300 whitespace-pre-wrap leading-relaxed bg-[#0a0a0c]">
                   {terminalOutput}
                   {isExecuting && (
                     <span className="inline-block w-2 h-4 bg-emerald-400 animate-pulse ml-0.5" />
                   )}
-                  <div ref={terminalEndRef} />
                 </div>
-                {/* Terminal Input */}
-                <form onSubmit={handleTerminalSubmit} className="flex items-center gap-2 px-4 py-2 bg-[#0a0a0c] border-t border-[#1e1e24]">
-                  <span className="text-emerald-400 font-mono text-sm select-none">$</span>
-                  <input
-                    ref={terminalInputRef}
-                    value={terminalInput}
-                    onChange={(e) => setTerminalInput(e.target.value)}
-                    onKeyDown={handleTerminalKeyDown}
-                    disabled={isExecuting}
-                    placeholder={isExecuting ? "Running..." : "Type a command..."}
-                    className="flex-1 bg-transparent text-gray-200 font-mono text-sm outline-none placeholder-gray-600"
-                    autoComplete="off"
-                    spellCheck="false"
-                  />
-                </form>
               </motion.div>
             )}
           </AnimatePresence>
@@ -1094,29 +1204,27 @@ export default function EditorPage() {
         <div className="w-105 bg-[#111114] border-l border-[#1e1e24] flex flex-col overflow-hidden">
           {/* Video Layout - Changes based on pinned state */}
           {(() => {
-            // Helper: get the video stream for a participant
-            const getStream = (p) => {
+            // Helper: get stream + status for a participant
+            const getParticipantMedia = (p) => {
               if (p.isYou) {
-                return isScreenSharing ? screenStream : localStream;
+                return { stream: localStream, isCameraOn, isMicOn };
               }
-              const remote = remoteStreams.get(p.id);
-              return remote?.stream || null;
+              const remote = remoteParticipantStreams?.get(p.id);
+              return {
+                stream: remote?.stream || null,
+                isCameraOn: remote?.isCameraOn ?? false,
+                isMicOn: remote?.isMicOn ?? true,
+              };
             };
 
-            // Inject real speaking state into participants
-            const participantsWithSpeaking = participants.map(p => ({
-              ...p,
-              isSpeaking: p.isYou ? localSpeaking : !!remoteSpeaking[p.id],
-            }));
-
-            const visibleParticipants = participantsWithSpeaking.slice(0, 3);
-            const hiddenParticipants = participantsWithSpeaking.slice(3);
+            const visibleParticipants = participants.slice(0, 3);
+            const hiddenParticipants = participants.slice(3);
             const hiddenCount = hiddenParticipants.length;
 
             // If someone is pinned, show spotlight layout
             if (pinnedUser) {
-              const mainUser = participantsWithSpeaking.find(p => p.id === pinnedUser);
-              const otherParticipants = participantsWithSpeaking.filter(p => p.id !== pinnedUser);
+              const mainUser = participants.find(p => p.id === pinnedUser);
+              const otherParticipants = participants.filter(p => p.id !== pinnedUser);
               const visibleOthers = otherParticipants.slice(0, 2);
               const hiddenOthers = otherParticipants.slice(2);
               const hiddenOthersCount = hiddenOthers.length;
@@ -1125,66 +1233,46 @@ export default function EditorPage() {
                 <>
                   {/* Pinned User - Large Display */}
                   <div className="p-4">
-                    <div className="relative rounded-2xl overflow-hidden bg-linear-to-br from-[#1a1a1f] to-[#0d0d0f] group" style={{ aspectRatio: '16/10', minHeight: '220px' }}>
-                      <div className="absolute inset-0 opacity-40" style={{ background: `radial-gradient(circle at 40% 30%, ${mainUser?.color}50, transparent 60%)` }} />
-                      <VideoTile
-                        stream={getStream(mainUser)}
-                        muted={mainUser?.isYou}
-                        initials={mainUser?.initials}
-                        color={mainUser?.color}
-                      />
-                      {/* User Info */}
-                      <div className="absolute bottom-3 left-3 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-black/70 backdrop-blur-sm text-sm text-white">
-                        {mainUser?.isSpeaking && (
-                          <div className="flex gap-0.5 items-end">
-                            {[1,2,3].map(i => (
-                              <motion.div 
-                                key={i} 
-                                className="w-1 bg-emerald-400 rounded-full" 
-                                animate={{ height: [4, 12, 4] }} 
-                                transition={{ duration: 0.4, repeat: Infinity, delay: i*0.1 }}
-                              />
-                            ))}
-                          </div>
-                        )}
-                        <span className="font-medium">{mainUser?.name}</span>
-                        {mainUser?.isHost && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/30 text-amber-400 border border-amber-500/30">
-                            HOST
-                          </span>
-                        )}
-                      </div>
-                      {/* Unpin Button */}
-                      <motion.button
-                        onClick={() => setPinnedUser(null)}
-                        className="absolute top-3 right-3 p-2 rounded-xl bg-emerald-500/30 text-emerald-400 border border-emerald-500/30"
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                        title="Unpin"
-                      >
-                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2">
-                          <path d="M12 2v10m0 0l-4-4m4 4l4-4M8 22h8" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      </motion.button>
-                    </div>
+                    {mainUser && (() => {
+                      const media = getParticipantMedia(mainUser);
+                      return (
+                        <VideoTile
+                          participant={mainUser}
+                          stream={media.stream}
+                          isCameraOn={media.isCameraOn}
+                          isMicOn={media.isMicOn}
+                          isLocal={mainUser.isYou}
+                          isSpeaking={mainUser.isSpeaking}
+                          size="large"
+                          onUnpin={() => setPinnedUser(null)}
+                          showUnpin
+                        />
+                      );
+                    })()}
                   </div>
 
                   {/* Controls */}
                   <div className="px-3 pb-4">
                     <div className="flex justify-center gap-2 p-2.5 rounded-2xl bg-[#0a0a0c] border border-[#1e1e24]">
-                      <CtrlBtn active={isMicOn} danger={!isMicOn} onClick={toggleMic}>
+                      <CtrlBtn active={isMicOn} danger={!isMicOn} onClick={toggleMic} title={isMicOn ? "Mute mic" : "Unmute mic"}>
                         {isMicOn ? <MicIcon /> : <MicOffIcon />}
                       </CtrlBtn>
-                      <CtrlBtn active={isCameraOn} danger={!isCameraOn} onClick={handleCameraToggle}>
+                      <CtrlBtn active={isCameraOn} danger={!isCameraOn} onClick={toggleCamera} title={isCameraOn ? "Turn off camera" : "Turn on camera"}>
                         {isCameraOn ? <VideoIcon /> : <VideoOffIcon />}
                       </CtrlBtn>
-                      <CtrlBtn active={isScreenSharing} onClick={handleScreenShareToggle}><ScreenIcon /></CtrlBtn>
+                      <CtrlBtn active={isScreenSharing} onClick={toggleScreenShare} title={isScreenSharing ? "Stop sharing" : "Share screen"}>
+                        <ScreenIcon />
+                      </CtrlBtn>
+                      <CtrlBtn active={showChat} onClick={() => setShowChat(!showChat)} title="Chat">
+                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      </CtrlBtn>
                       <div className="w-px h-8 bg-[#2a2a32]" />
                       <motion.button 
-                        onClick={handleLeaveRoom} 
+                        onClick={handleHangUp} 
                         className="p-2.5 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-all" 
                         whileHover={{ scale: 1.05 }} 
                         whileTap={{ scale: 0.95 }}
+                        title="Leave room"
                       >
                         <PhoneIcon />
                       </motion.button>
@@ -1197,33 +1285,22 @@ export default function EditorPage() {
                       Others · {otherParticipants.length}
                     </div>
                     <div className="grid grid-cols-2 gap-3 flex-1">
-                      {visibleOthers.map((p, i) => (
-                        <motion.div 
-                          key={p.id} 
-                          initial={{ opacity: 0, scale: 0.8 }} 
-                          animate={{ opacity: 1, scale: 1 }} 
-                          transition={{ delay: i * 0.05 }}
-                          onClick={() => setPinnedUser(p.id)}
-                          className="relative rounded-2xl overflow-hidden cursor-pointer bg-[#1a1a1f] group hover:ring-2 hover:ring-white/20 hover:scale-[1.02] transition-all"
-                          style={{ aspectRatio: '4/3', minHeight: '100px' }}
-                        >
-                          <div className="absolute inset-0 opacity-30" style={{ background: `radial-gradient(circle at 50% 40%, ${p.color}60, transparent 70%)` }} />
+                      {visibleOthers.map((p) => {
+                        const media = getParticipantMedia(p);
+                        return (
                           <VideoTile
-                            stream={getStream(p)}
-                            muted={p.isYou}
-                            initials={p.initials}
-                            color={p.color}
+                            key={p.id}
+                            participant={p}
+                            stream={media.stream}
+                            isCameraOn={media.isCameraOn}
+                            isMicOn={media.isMicOn}
+                            isLocal={p.isYou}
+                            isSpeaking={p.isSpeaking}
+                            size="small"
+                            onClick={() => setPinnedUser(p.id)}
                           />
-                          <div className="absolute bottom-2 left-2 right-2 text-xs text-white font-medium bg-black/60 backdrop-blur-sm px-2 py-1 rounded-lg truncate text-center">
-                            {p.isYou ? "You" : p.name.split(" ")[0]}
-                          </div>
-                          <div className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <svg className="w-3.5 h-3.5 text-white/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M12 2v10m0 0l-4-4m4 4l4-4M8 22h8" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
-                          </div>
-                        </motion.div>
-                      ))}
+                        );
+                      })}
                       {hiddenOthersCount > 0 && (
                         <ParticipantsOverflowTile 
                           hiddenParticipants={hiddenOthers}
@@ -1247,62 +1324,23 @@ export default function EditorPage() {
                   </div>
                   
                   <div className="flex-1 flex flex-col gap-3 min-h-0">
-                    {visibleParticipants.map((p, i) => (
-                      <motion.div 
-                        key={p.id} 
-                        initial={{ opacity: 0, y: 20 }} 
-                        animate={{ opacity: 1, y: 0 }} 
-                        transition={{ delay: i * 0.08 }}
-                        onClick={() => setPinnedUser(p.id)}
-                        className={`relative flex-1 min-h-25 rounded-2xl overflow-hidden cursor-pointer bg-[#1a1a1f] group hover:ring-2 hover:ring-white/20 transition-all ${
-                          p.isSpeaking ? "ring-2 ring-emerald-500/50" : ""
-                        }`}
-                      >
-                        <div className="absolute inset-0 opacity-30" style={{ background: `radial-gradient(circle at 50% 40%, ${p.color}60, transparent 70%)` }} />
-                        <VideoTile
-                          stream={getStream(p)}
-                          muted={p.isYou}
-                          initials={p.initials}
-                          color={p.color}
-                        />
-                        
-                        {/* Speaking indicator */}
-                        {p.isSpeaking && (
-                          <div className="absolute top-3 left-3 flex gap-0.5 items-end bg-black/60 px-2 py-1.5 rounded-lg">
-                            {[1,2,3].map(j => (
-                              <motion.div 
-                                key={j} 
-                                className="w-1 bg-emerald-400 rounded-full" 
-                                animate={{ height: [4, 10, 4] }} 
-                                transition={{ duration: 0.35, repeat: Infinity, delay: j*0.1 }}
-                              />
-                            ))}
-                          </div>
-                        )}
-                        
-                        {/* User Info */}
-                        <div className="absolute bottom-3 left-3 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-black/70 backdrop-blur-sm text-sm text-white">
-                          <span className="font-medium">{p.isYou ? "You" : p.name}</span>
-                          {p.isHost && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/30 text-amber-400">
-                              HOST
-                            </span>
-                          )}
-                          {p.isYou && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/30 text-emerald-400">
-                              YOU
-                            </span>
-                          )}
+                    {visibleParticipants.map((p) => {
+                      const media = getParticipantMedia(p);
+                      return (
+                        <div key={p.id} className="flex-1 min-h-[100px]">
+                          <VideoTile
+                            participant={p}
+                            stream={media.stream}
+                            isCameraOn={media.isCameraOn}
+                            isMicOn={media.isMicOn}
+                            isLocal={p.isYou}
+                            isSpeaking={p.isSpeaking}
+                            size="medium"
+                            onClick={() => setPinnedUser(p.id)}
+                          />
                         </div>
-
-                        {/* Pin on hover */}
-                        <div className="absolute top-3 right-3 p-2 rounded-xl bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <svg className="w-4 h-4 text-white/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M12 2v10m0 0l-4-4m4 4l4-4M8 22h8" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                        </div>
-                      </motion.div>
-                    ))}
+                      );
+                    })}
 
                     {/* +X others tile */}
                     {hiddenCount > 0 && (
@@ -1326,21 +1364,32 @@ export default function EditorPage() {
                 {/* Controls - Fixed at bottom */}
                 <div className="px-4 py-3 shrink-0 border-t border-[#1e1e24] bg-[#111114]">
                   <div className="flex justify-center gap-2 p-2.5 rounded-2xl bg-[#0a0a0c] border border-[#1e1e24]">
-                    <CtrlBtn active={isMicOn} danger={!isMicOn} onClick={toggleMic}>
+                    <CtrlBtn active={isMicOn} danger={!isMicOn} onClick={toggleMic} title={isMicOn ? "Mute mic" : "Unmute mic"}>
                       {isMicOn ? <MicIcon /> : <MicOffIcon />}
                     </CtrlBtn>
-                    <CtrlBtn active={isCameraOn} danger={!isCameraOn} onClick={handleCameraToggle}>
+                    <CtrlBtn active={isCameraOn} danger={!isCameraOn} onClick={toggleCamera} title={isCameraOn ? "Turn off camera" : "Turn on camera"}>
                       {isCameraOn ? <VideoIcon /> : <VideoOffIcon />}
                     </CtrlBtn>
-                    <CtrlBtn active={isScreenSharing} onClick={handleScreenShareToggle}><ScreenIcon /></CtrlBtn>
+                    <CtrlBtn active={isScreenSharing} onClick={toggleScreenShare} title={isScreenSharing ? "Stop sharing" : "Share screen"}>
+                      <ScreenIcon />
+                    </CtrlBtn>
+                    <CtrlBtn active={showChat} onClick={() => setShowChat(!showChat)} title="Chat">
+                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </CtrlBtn>
                     <div className="w-px h-8 bg-[#2a2a32]" />
                     <motion.button 
-                      onClick={handleLeaveRoom} 
-                      className="p-2.5 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-all" 
+                      onClick={handleHangUp} 
+                      className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-all ${
+                        isHost
+                          ? "bg-red-600 text-white border-red-600 hover:bg-red-700"
+                          : "bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500 hover:text-white"
+                      }`}
                       whileHover={{ scale: 1.05 }} 
                       whileTap={{ scale: 0.95 }}
+                      title={isHost ? "End session for everyone" : "Leave room"}
                     >
                       <PhoneIcon />
+                      <span className="text-xs font-bold">{isHost ? "End" : "Leave"}</span>
                     </motion.button>
                   </div>
                 </div>
@@ -1350,50 +1399,14 @@ export default function EditorPage() {
         </div>
       </div>
 
-      {/* ══════════════════════ REMOTE AUDIO PLAYBACK ══════════════════════ */}
-      {/* Dedicated components that reliably attach remote audio streams */}
-      {Array.from(remoteStreams.entries()).map(([peerId, { stream }]) => (
-        <RemoteAudio key={`audio-${peerId}`} stream={stream} peerId={peerId} />
-      ))}
-
-      {/* ══════════════════════ TOAST NOTIFICATION ══════════════════════ */}
-      <AnimatePresence>
-        {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: -40, x: "-50%" }}
-            animate={{ opacity: 1, y: 0, x: "-50%" }}
-            exit={{ opacity: 0, y: -40, x: "-50%" }}
-            className="fixed top-6 left-1/2 z-[9999] px-5 py-3 rounded-xl shadow-2xl backdrop-blur-lg border flex items-center gap-3 text-sm font-medium"
-            style={{
-              background: toast.type === "warning" ? "rgba(245, 158, 11, 0.15)" : "rgba(16, 185, 129, 0.15)",
-              borderColor: toast.type === "warning" ? "rgba(245, 158, 11, 0.3)" : "rgba(16, 185, 129, 0.3)",
-              color: toast.type === "warning" ? "#fbbf24" : "#34d399",
-            }}
-          >
-            <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-              {toast.type === "warning" ? (
-                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" strokeLinecap="round" strokeLinejoin="round" />
-              ) : (
-                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" strokeLinecap="round" strokeLinejoin="round" />
-              )}
-            </svg>
-            {toast.message}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-
-
-
       {/* ══════════════════════ FLOATING CHAT ══════════════════════ */}
       <FloatingChat
         isOpen={showChat}
         onToggle={() => setShowChat(!showChat)}
         socket={socket}
-        roomId={normalizedRoomId}
+        roomId={roomId ? roomId.toUpperCase() : roomId}
         userName={userName}
         participants={participants}
-        onUnreadChange={setChatUnread}
       />
 
       {/* ══════════════════════ STATUS BAR ══════════════════════ */}
@@ -1775,74 +1788,136 @@ function ParticipantsOverflowTile({ hiddenParticipants, hiddenCount, onSelectPar
     </div>
   );
 }
+// ═══════════════════════════════════════════════════════════════
+// VIDEO TILE — renders actual camera/screen feed or avatar fallback
+// ═══════════════════════════════════════════════════════════════
+function VideoTile({ participant, stream, isCameraOn, isMicOn, isLocal, isSpeaking, size, onClick, onUnpin, showUnpin }) {
+  const videoRef = useRef(null);
 
-/**
- * RemoteAudio — plays a remote peer's audio using BOTH Web Audio API
- * and a standard <audio> element for maximum compatibility.
- */
-function RemoteAudio({ stream, peerId }) {
-  const audioRef = useRef(null);
-  const ctxRef = useRef(null);
-  const sourceRef = useRef(null);
-
+  // Attach stream to the <video> element whenever the stream reference changes.
+  // Using key={stream?.id} on the <video> element would re-mount the element
+  // which causes a flash; instead we surgically update srcObject.
   useEffect(() => {
-    if (!stream) return;
+    const video = videoRef.current;
+    if (!video) return;
 
-    const audioTracks = stream.getAudioTracks();
-    console.log(`[RemoteAudio] ${peerId}: ${audioTracks.length} audio tracks, enabled=${audioTracks[0]?.enabled}, state=${audioTracks[0]?.readyState}`);
-
-    // ---- Method 1: Web Audio API (most reliable) ----
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      // Resume context (required after user interaction)
-      if (ctx.state === "suspended") {
-        ctx.resume();
-        const resumeOnClick = () => { ctx.resume(); document.removeEventListener("click", resumeOnClick); };
-        document.addEventListener("click", resumeOnClick);
-      }
-      const source = ctx.createMediaStreamSource(stream);
-      // Connect directly to speakers
-      source.connect(ctx.destination);
-      ctxRef.current = ctx;
-      sourceRef.current = source;
-      console.log(`[RemoteAudio] ${peerId}: Web Audio API connected, ctx.state=${ctx.state}`);
-
-      // Monitor audio levels (debug)
-      const analyser = ctx.createAnalyser();
-      source.connect(analyser);
-      analyser.fftSize = 256;
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      let loggedActive = false;
-      const checkLevel = setInterval(() => {
-        analyser.getByteFrequencyData(dataArray);
-        const maxLevel = Math.max(...dataArray);
-        if (maxLevel > 10 && !loggedActive) {
-          console.log(`[RemoteAudio] ${peerId}: ✅ AUDIO DATA DETECTED! level=${maxLevel}`);
-          loggedActive = true;
+    if (stream && video.srcObject !== stream) {
+      video.srcObject = stream;
+      video.play().catch(e => {
+        // Autoplay blocked — try muted first, then unmute if local
+        if (e.name === "NotAllowedError") {
+          video.muted = true;
+          video.play().catch(() => {});
         }
-      }, 500);
-
-      return () => {
-        clearInterval(checkLevel);
-        source.disconnect();
-        ctx.close();
-      };
-    } catch (err) {
-      console.warn(`[RemoteAudio] ${peerId}: Web Audio API failed, falling back to <audio>`, err);
-    }
-
-    // ---- Method 2: <audio> element fallback ----
-    const el = audioRef.current;
-    if (el) {
-      el.srcObject = stream;
-      el.play().catch(() => {
-        const resume = () => { el.play().catch(() => {}); };
-        document.addEventListener("click", resume, { once: true });
       });
+    } else if (!stream) {
+      video.srcObject = null;
     }
+  }, [stream]);
 
-    return () => { if (audioRef.current) audioRef.current.srcObject = null; };
-  }, [stream, peerId]);
+  // Determine whether to show the live video or the avatar fallback.
+  // isCameraOn is the SIGNALED state from the remote peer; we cannot trust
+  // track.enabled alone because remote tracks are always reported as enabled.
+  const hasLiveVideoTrack = !!stream && stream.getVideoTracks().some(
+    t => t.readyState === "live"
+  );
+  const showVideo = hasLiveVideoTrack && isCameraOn;
 
-  return <audio ref={audioRef} autoPlay playsInline style={{ display: "none" }} />;
+  const sizeMap = {
+    large:  { minHeight: "220px", aspectRatio: "16/10", avatarCls: "w-24 h-24 text-3xl rounded-2xl" },
+    medium: { minHeight: "100px", aspectRatio: "16/9",  avatarCls: "w-16 h-16 text-xl  rounded-xl"  },
+    small:  { minHeight: "90px",  aspectRatio: "4/3",   avatarCls: "w-14 h-14 text-lg  rounded-xl"  },
+  };
+  const sz = sizeMap[size] || sizeMap.medium;
+
+  return (
+    <div
+      onClick={onClick}
+      className={`relative w-full rounded-2xl overflow-hidden bg-[#1a1a1f] cursor-pointer group transition-all ${
+        isSpeaking ? "ring-2 ring-emerald-400/70" : "hover:ring-2 hover:ring-white/20"
+      }`}
+      style={{ minHeight: sz.minHeight, aspectRatio: sz.aspectRatio }}
+    >
+      {/* Video element — always in DOM; opacity controlled by showVideo */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted={isLocal}  // local preview must be muted to avoid feedback
+        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
+          showVideo ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+      />
+
+      {/* Avatar fallback — shown when camera is off or stream is absent */}
+      {!showVideo && (
+        <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1f]">
+          <div
+            className={`relative ${sz.avatarCls} flex items-center justify-center text-white font-bold shadow-2xl`}
+            style={{ background: `linear-gradient(135deg, ${participant.color}, ${participant.color}88)` }}
+          >
+            {isSpeaking && (
+              <motion.div
+                className={`absolute -inset-2 ${sz.avatarCls} border-2`}
+                style={{ borderColor: participant.color }}
+                animate={{ scale: [1, 1.1, 1], opacity: [0.8, 0.2, 0.8] }}
+                transition={{ duration: 1.3, repeat: Infinity }}
+              />
+            )}
+            {participant.initials}
+          </div>
+        </div>
+      )}
+
+      {/* Gradient overlay for name legibility */}
+      <div className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
+
+      {/* Speaking bars (top-left) */}
+      {isSpeaking && (
+        <div className="absolute top-2 left-2 flex gap-0.5 items-end bg-black/60 px-1.5 py-1 rounded-lg">
+          {[1, 2, 3].map(j => (
+            <motion.div
+              key={j}
+              className="w-0.5 bg-emerald-400 rounded-full"
+              animate={{ height: [3, 9, 3] }}
+              transition={{ duration: 0.35, repeat: Infinity, delay: j * 0.1 }}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Muted mic indicator (top-right) */}
+      {!isMicOn && (
+        <div className="absolute top-2 right-2 p-1.5 rounded-lg bg-red-500/30 backdrop-blur-sm">
+          <MicOffIcon />
+        </div>
+      )}
+
+      {/* Name badge */}
+      <div className="absolute bottom-2 left-2 flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-black/70 backdrop-blur-sm text-xs text-white">
+        <span className="font-medium">{participant.isYou ? "You" : participant.name}</span>
+        {participant.isHost && (
+          <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-amber-500/30 text-amber-400">HOST</span>
+        )}
+        {participant.isYou && (
+          <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-emerald-500/30 text-emerald-400">YOU</span>
+        )}
+      </div>
+
+      {/* Unpin button (spotlight only) */}
+      {showUnpin && (
+        <motion.button
+          onClick={e => { e.stopPropagation(); onUnpin?.(); }}
+          className="absolute top-2 right-2 p-1.5 rounded-xl bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 opacity-0 group-hover:opacity-100 transition-opacity"
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          title="Unpin"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </motion.button>
+      )}
+    </div>
+  );
 }

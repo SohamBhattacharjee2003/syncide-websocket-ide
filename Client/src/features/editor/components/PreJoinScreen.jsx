@@ -21,8 +21,8 @@ export default function PreJoinScreen({
   userName,
   roomId,
 }) {
-  const [isCameraOn, setIsCameraOn] = useState(true);
-  const [isMicOn, setIsMicOn] = useState(true);
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [isMicOn, setIsMicOn] = useState(false);
   const [stream, setStream] = useState(null);
   const [audioLevel, setAudioLevel] = useState(0);
   const [devices, setDevices] = useState({ video: [], audio: [] });
@@ -68,25 +68,33 @@ export default function PreJoinScreen({
 
       try {
         const constraints = {
-          video: isCameraOn ? {
+          video: {
             deviceId: selectedVideoDevice ? { exact: selectedVideoDevice } : undefined,
             width: { ideal: 1280 },
             height: { ideal: 720 },
-          } : false,
-          audio: isMicOn ? {
+          },
+          audio: {
             deviceId: selectedAudioDevice ? { exact: selectedAudioDevice } : undefined,
-          } : false,
+          },
         };
 
         const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
         setStream(mediaStream);
+
+        // Set initial state based on what was actually obtained
+        if (mediaStream.getVideoTracks().length > 0) {
+          mediaStream.getVideoTracks()[0].enabled = isCameraOn;
+        }
+        if (mediaStream.getAudioTracks().length > 0) {
+          mediaStream.getAudioTracks()[0].enabled = isMicOn;
+        }
 
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
         }
 
         // Setup audio level monitoring
-        if (isMicOn && mediaStream.getAudioTracks().length > 0) {
+        if (mediaStream.getAudioTracks().length > 0) {
           audioContextRef.current = new AudioContext();
           const source = audioContextRef.current.createMediaStreamSource(mediaStream);
           analyserRef.current = audioContextRef.current.createAnalyser();

@@ -109,8 +109,8 @@ export default function EditorPage() {
   const [terminalOutput, setTerminalOutput] = useState("Welcome to SyncIDE Terminal\n$ ");
   const [isExecuting, setIsExecuting] = useState(false);
   const [showChat, setShowChat] = useState(false);
-  const [isMicOn, setIsMicOn] = useState(true);
-  const [isCameraOn, setIsCameraOn] = useState(true);
+  const [isMicOn, setIsMicOn] = useState(false);
+  const [isCameraOn, setIsCameraOn] = useState(false);
   const [activePanel, setActivePanel] = useState("explorer");
   const [contextMenu, setContextMenu] = useState({ show: false, x: 0, y: 0, item: null });
   const [showAccountMenu, setShowAccountMenu] = useState(false);

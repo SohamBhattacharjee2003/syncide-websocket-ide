@@ -47,14 +47,23 @@ export default function VideoSidePanel({
     }
   }, [localStream]);
 
-  const participants = Object.entries(remoteStreams);
+  const participants = Array.from(
+    remoteStreams instanceof Map ? remoteStreams.entries() : Object.entries(remoteStreams)
+  );
   const allParticipants = [
-    { id: "local", stream: localStream, name: userName, isLocal: true },
-    ...participants.map(([id, stream]) => ({
+    { 
+      id: "local", 
+      stream: localStream, 
+      name: userName, 
+      isLocal: true,
+      isCameraOff: !isCameraOn
+    },
+    ...participants.map(([id, data]) => ({
       id,
-      stream,
-      name: users.find((u) => u.id === id)?.name || "Participant",
+      stream: data?.stream ?? data,
+      name: data?.userName || users.find((u) => u.id === id)?.name || "Participant",
       isLocal: false,
+      isCameraOff: !data?.isCameraOn,
     })),
   ];
 
@@ -91,7 +100,12 @@ export default function VideoSidePanel({
             />
             
             <motion.button
-              onClick={onToggleMic}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log("[VideoSidePanel] Mic button clicked");
+                onToggleMic?.();
+              }}
               className={`p-2 rounded-lg transition-all ${
                 isMicOn ? "text-neutral-400 hover:text-white hover:bg-white/5" : "text-red-400 bg-red-500/20"
               }`}
@@ -101,7 +115,12 @@ export default function VideoSidePanel({
             </motion.button>
             
             <motion.button
-              onClick={onToggleCamera}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log("[VideoSidePanel] Camera button clicked");
+                onToggleCamera?.();
+              }}
               className={`p-2 rounded-lg transition-all ${
                 isCameraOn ? "text-neutral-400 hover:text-white hover:bg-white/5" : "text-red-400 bg-red-500/20"
               }`}
@@ -117,7 +136,12 @@ export default function VideoSidePanel({
             <div className="w-6 h-px bg-white/10 my-1" />
 
             <motion.button
-              onClick={onEndCall}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log("[VideoSidePanel] End call button clicked");
+                onEndCall?.();
+              }}
               className="p-2 rounded-lg text-red-400 hover:bg-red-500/20 transition-all"
               whileTap={{ scale: 0.9 }}
             >
@@ -365,7 +389,7 @@ export default function VideoSidePanel({
                   name={participant.name}
                   isLocal={participant.isLocal}
                   isMuted={participant.isLocal ? !isMicOn : false}
-                  isCameraOff={participant.isLocal ? !isCameraOn : false}
+                  isCameraOff={participant.isCameraOff}
                   isPinned={pinnedUser === participant.id}
                   onPin={() => setPinnedUser(
                     pinnedUser === participant.id ? null : participant.id
@@ -465,7 +489,7 @@ function FeatureCard({ icon: Icon, label, desc }) {
 }
 
 // Video tile component
-function VideoTile({ stream, name, isLocal, isMuted, isCameraOff, isPinned, onPin, index }) {
+function VideoTile({ stream, name, isLocal, isMuted, isCameraOff, isPinned, onPin, index, isSpeaking = false }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
@@ -509,14 +533,8 @@ function VideoTile({ stream, name, isLocal, isMuted, isCameraOff, isPinned, onPi
           />
           <motion.div
             className={`w-14 h-14 rounded-xl bg-gradient-to-br ${gradients[index % gradients.length]} flex items-center justify-center text-white text-lg font-bold shadow-xl`}
-            animate={{ 
-              boxShadow: [
-                "0 8px 25px -5px rgba(0,0,0,0.3)",
-                "0 8px 35px -5px rgba(0,0,0,0.4)",
-                "0 8px 25px -5px rgba(0,0,0,0.3)"
-              ]
-            }}
-            transition={{ duration: 3, repeat: Infinity }}
+            animate={{ scale: [1, 1.02, 1] }}
+            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
           >
             {name?.charAt(0)?.toUpperCase() || "?"}
           </motion.div>
@@ -560,16 +578,16 @@ function VideoTile({ stream, name, isLocal, isMuted, isCameraOff, isPinned, onPi
         className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
       />
 
-      {/* Speaking indicator ring */}
-      {!isMuted && (
+      {/* Speaking indicator ring — only when isSpeaking prop is true */}
+      {isSpeaking && (
         <motion.div
           className="absolute inset-0 rounded-xl border-2 border-emerald-400/60 pointer-events-none"
           initial={{ opacity: 0, scale: 1.02 }}
           animate={{ 
-            opacity: [0, 0.6, 0],
+            opacity: [0, 0.8, 0],
             scale: [1, 1.02, 1]
           }}
-          transition={{ duration: 1.5, repeat: Infinity }}
+          transition={{ duration: 1.2, repeat: Infinity }}
         />
       )}
     </motion.div>
@@ -578,9 +596,20 @@ function VideoTile({ stream, name, isLocal, isMuted, isCameraOff, isPinned, onPi
 
 // Control button
 function ControlButton({ icon: Icon, onClick, active, danger, tooltip }) {
+  const handleClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log(`[VideoSidePanel.ControlButton] Clicked: ${tooltip}`);
+    if (onClick) {
+      onClick();
+    } else {
+      console.warn(`[VideoSidePanel.ControlButton] No onClick handler for ${tooltip}`);
+    }
+  };
+
   return (
     <motion.button
-      onClick={onClick}
+      onClick={handleClick}
       className={`relative p-3 rounded-xl transition-all ${
         danger
           ? "text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20"

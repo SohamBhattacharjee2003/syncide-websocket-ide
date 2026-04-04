@@ -2,21 +2,23 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState, useCallback } from "react";
 import JoinRoomModal from "../components/JoinRoomModal";
 import { motion, AnimatePresence } from "framer-motion";
-import socket from "../socket/socket";
+import socket from "../../../shared/socket/socket";
+import { useAuth } from "../../../shared/context/AuthContext";
 
 // Components
-import TopBar from "../components/editor/TopBar";
-import Sidebar from "../components/editor/Sidebar";
-import EditorPane from "../components/editor/EditorPane";
-import RightPanel from "../components/editor/RightPanel";
-import StatusBar from "../components/editor/StatusBar";
-import Terminal from "../components/editor/Terminal";
-import VideoCall from "../components/editor/VideoCall";
-import VideoSidePanel from "../components/editor/VideoSidePanel";
-import PreJoinScreen from "../components/editor/PreJoinScreen";
+import TopBar from "../components/TopBar";
+import Sidebar from "../components/Sidebar";
+import EditorPane from "../components/EditorPane";
+import RightPanel from "../components/RightPanel";
+import StatusBar from "../components/StatusBar";
+import Terminal from "../components/Terminal";
+import VideoCall from "../components/VideoCall";
+import VideoSidePanel from "../components/VideoSidePanel";
+import PreJoinScreen from "../components/PreJoinScreen";
 
 // Hooks
 import useWebRTC from "../hooks/useWebRTC";
+import useMediaStream from "../hooks/useMediaStream";
 
 // Sample users for demo - in production, these come from socket
 // Remove mockUsers. In production, users come from socket events.
@@ -35,7 +37,7 @@ function greet(name) {
 
 const users = ["Alex", "Sarah", "Mike"];
 
-users.forEach(user => {
+users.forEach((user) => {
   console.log(greet(user));
 });
 
@@ -45,44 +47,37 @@ users.forEach(user => {
 // TypeScript - Start coding with type safety
 
 interface User {
-  const boilerplates = {
-    javascript: `// Welcome to SyncIDE! 🚀
-  // Start coding collaboratively...
+  id: number;
+  name: string;
+  email: string;
+}
 
-  function greet(name) {
-    return `Hello, ${name}! Welcome to the collaborative IDE.`;
-  }
+function greet(user: User): string {
+  return \`Hello, \${user.name}! Welcome to the collaborative IDE.\`;
+}
 
-  // Try editing this code and see it sync in real-time!
-  `,
-    typescript: `// Welcome to SyncIDE! 🚀
-  // TypeScript - Start coding with type safety
+const users: User[] = [
+  { id: 1, name: "Alex", email: "alex@example.com" },
+  { id: 2, name: "Sarah", email: "sarah@example.com" },
+  { id: 3, name: "Mike", email: "mike@example.com" },
+];
 
-  interface User {
-    id: number;
-    name: string;
-    email: string;
-  }
-
-  function greet(user: User): string {
-    return `Hello, ${user.name}! Welcome to the collaborative IDE.`;
-  }
-
-  // Try editing this code and see it sync in real-time!
-  `,
-    python: `# Welcome to SyncIDE! 🚀
-  # Python - Start coding collaboratively
-
+users.forEach((user) => {
+  console.log(greet(user));
+});
 `,
-      """Return a greeting message."""
-      return f"Hello, {name}! Welcome to the collaborative IDE."
+  python: `# Welcome to SyncIDE! 🚀
+# Python - Start coding collaboratively
 
+def greet(name: str) -> str:
+    return f"Hello, {name}! Welcome to the collaborative IDE."
+
+users = ["Alex", "Sarah", "Mike"]
+
+for user in users:
+    print(greet(user))
+`,
   cpp: `// Welcome to SyncIDE! 🚀
-      pass
-
-  # Try editing this code and see it sync in real-time!
-  `,
-  };
 // C++ - Start coding collaboratively
 
 #include <iostream>
@@ -90,52 +85,50 @@ interface User {
 #include <string>
 
 std::string greet(const std::string& name) {
-    return "Hello, " + name + "! Welcome to the collaborative IDE.";
+  return "Hello, " + name + "! Welcome to the collaborative IDE.";
 }
 
 int main() {
-    std::vector<std::string> users = {"Alex", "Sarah", "Mike"};
-    
-    for (const auto& user : users) {
-        std::cout << greet(user) << std::endl;
-    }
-    
-    return 0;
-}
+  std::vector<std::string> users = {"Alex", "Sarah", "Mike"};
 
-// Try editing this code and see it sync in real-time!
+  for (const auto& user : users) {
+    std::cout << greet(user) << std::endl;
+  }
+
+  return 0;
+}
 `,
   html: `<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SyncIDE - Collaborative Coding</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
-            color: #e5e7eb;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .container {
-            text-align: center;
-            padding: 2rem;
-        }
-        h1 {
-            color: #10b981;
-            font-size: 3rem;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SyncIDE - Collaborative Coding</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+      color: #e5e7eb;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      text-align: center;
+      padding: 2rem;
+    }
+    h1 {
+      color: #10b981;
+      font-size: 3rem;
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Welcome to SyncIDE! 🚀</h1>
-        <p>Start coding collaboratively in real-time.</p>
-    </div>
+  <div class="container">
+    <h1>Welcome to SyncIDE! 🚀</h1>
+    <p>Start coding collaboratively in real-time.</p>
+  </div>
 </body>
 </html>
 `,
@@ -217,6 +210,7 @@ body {
 export default function EditorPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   
   // State
   const [code, setCode] = useState(boilerplates.javascript);
@@ -244,22 +238,28 @@ export default function EditorPage() {
   
   const saveTimeout = useRef(null);
 
-  // WebRTC Hook
+  // Media Stream Hook - handles camera, mic, and screen sharing
   const {
     localStream,
     screenStream,
-    remoteStreams,
+    localVideoRef,
     isCameraOn,
     isMicOn,
     isScreenSharing,
-    startCamera,
-    stopCamera,
     toggleCamera,
     toggleMic,
-    startScreenShare,
-    stopScreenShare,
+    toggleScreenShare,
+    stopAll,
+  } = useMediaStream();
+
+  // WebRTC Hook - handles peer connections and remote streams
+  const {
+    remoteStreams,
+    peerStatuses,
+    joinCall,
+    leaveCall,
     cleanup: cleanupWebRTC,
-  } = useWebRTC({ roomId, socket, userName });
+  } = useWebRTC(socket, roomId, userName, localStream);
 
   // Socket connection
   useEffect(() => {
@@ -384,29 +384,39 @@ export default function EditorPage() {
     setShowPreJoin(false);
     setIsInCall(true);
     setIsVideoPanelOpen(true);
-    
-    // Notify others
-    socket.emit("join-video-call", { roomId, userName });
-  }, [roomId, userName]);
+
+    // Mirror the pre-join selections inside the persistent media stream
+    if (camOn !== isCameraOn) {
+      await toggleCamera();
+    }
+    if (micOn !== isMicOn) {
+      await toggleMic();
+    }
+
+    joinCall();
+  }, [isCameraOn, isMicOn, joinCall, toggleCamera, toggleMic]);
 
   const handleEndCall = useCallback(() => {
+    stopAll();
     cleanupWebRTC();
     setIsInCall(false);
     setShowVideoCall(false);
     
     // Notify others
     socket.emit("leave-video-call", { roomId, userName });
-  }, [roomId, userName, cleanupWebRTC]);
+  }, [roomId, userName, cleanupWebRTC, stopAll]);
 
-  const handleStartCall = useCallback(async () => {
+  const handleStartCall = useCallback(() => {
     try {
-      await startCamera();
-      setIsInCall(true);
-      socket.emit("join-video-call", { roomId, userName });
+      if (!isInCall) {
+        joinCall();
+        setIsInCall(true);
+        setIsVideoPanelOpen(true);
+      }
     } catch (error) {
       console.error("Failed to start call:", error);
     }
-  }, [roomId, userName, startCamera]);
+  }, [isInCall, joinCall]);
 
   if (showJoinModal) {
     return <JoinRoomModal open={true} onClose={handleJoinModalClose} />;
@@ -453,6 +463,7 @@ export default function EditorPage() {
         fileName={fileName}
         isInCall={isInCall}
         onToggleVideoCall={handleToggleVideoCall}
+        user={user}
       />
 
       {/* Main Content */}
@@ -499,8 +510,8 @@ export default function EditorPage() {
                 isScreenSharing={isScreenSharing}
                 onToggleCamera={toggleCamera}
                 onToggleMic={toggleMic}
-                onStartScreenShare={startScreenShare}
-                onStopScreenShare={stopScreenShare}
+                onStartScreenShare={toggleScreenShare}
+                onStopScreenShare={toggleScreenShare}
                 onStartCall={handleStartCall}
                 onEndCall={handleEndCall}
                 onOpenFullscreen={() => setShowVideoCall(true)}
@@ -600,8 +611,8 @@ export default function EditorPage() {
           isScreenSharing={isScreenSharing}
           onToggleCamera={toggleCamera}
           onToggleMic={toggleMic}
-          onStartScreenShare={startScreenShare}
-          onStopScreenShare={stopScreenShare}
+          onStartScreenShare={toggleScreenShare}
+          onStopScreenShare={toggleScreenShare}
           onStartCall={handleStartCall}
           onEndCall={handleEndCall}
           users={users}

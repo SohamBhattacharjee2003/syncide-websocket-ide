@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import Editor from "@monaco-editor/react";
 import logo from "../../../assets/logo.png";
@@ -9,6 +9,13 @@ import { languages } from "../../../shared/constants";
 
 // Utils
 import { getBoilerplate } from "../../../shared/utils";
+
+// Auth
+import { useAuth } from "../../../shared/context/AuthContext";
+import { workspaceAPI, executeAPI } from "../../../shared/services/api";
+
+// Terminal
+import Terminal from "../components/Terminal";
 
 // Workspaces
 import {
@@ -134,6 +141,7 @@ export default function PlainEditorPage() {
   const { workspaceId } = useParams();
   const navigate = useNavigate();
   const editorRef = useRef(null);
+  const { user: authUser } = useAuth();
 
   // File/Folder state
   const [files, setFiles] = useState([]);
@@ -154,96 +162,107 @@ export default function PlainEditorPage() {
   const [sidebarWidth] = useState(260);
   const [showTerminal, setShowTerminal] = useState(false);
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
-  const [terminalOutput, setTerminalOutput] = useState("Welcome to SyncIDE Terminal\n$ ");
+  const [runOutput, setRunOutput] = useState("");
   const [isExecuting, setIsExecuting] = useState(false);
   const [activePanel, setActivePanel] = useState("explorer");
   const [contextMenu, setContextMenu] = useState({ show: false, x: 0, y: 0, item: null });
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [isSaved, setIsSaved] = useState(true);
+  const [saveError, setSaveError] = useState(null);
 
-  // Initialize workspace and files
+  // Compute user display info
+  const userName = authUser?.username || authUser?.name || "User";
+  const userInitials = userName.split(" ").map((s) => s[0]).join("").toUpperCase().slice(0, 2) || "U";
+
+  // Initialize workspace and files — load from backend API first, fallback to localStorage
   useEffect(() => {
-    const savedWorkspaces = localStorage.getItem("syncide_workspaces");
-    if (savedWorkspaces) {
-      const workspaces = JSON.parse(savedWorkspaces);
-      const ws = workspaces.find(w => w.id === workspaceId);
-      if (ws) {
+    let cancelled = false;
+    const loadWorkspace = async () => {
+      try {
+        const data = await workspaceAPI.getOne(workspaceId);
+        if (cancelled) return;
+        const ws = data.workspace;
         setWorkspace(ws);
-        setSelectedLanguage(ws.language || "javascript");
-        
-        // Load saved code or use boilerplate
-        const savedCode = localStorage.getItem(`syncide_code_${workspaceId}`);
-        const initialFile = {
-          id: "1",
-          name: `main.${languages[ws.language]?.ext || "js"}`,
-          type: "file",
-          language: ws.language || "javascript",
-          content: savedCode || getBoilerplate(ws.language || "javascript"),
-        };
-        setFiles([initialFile]);
-        setOpenTabs([{ id: "1", name: initialFile.name, language: initialFile.language, type: "file" }]);
+        const lang = ws.language || "javascript";
+        setSelectedLanguage(lang);
+        // Use saved files from DB, or create default
+        const wsFiles = ws.files && ws.files.length > 0
+          ? ws.files
+          : [{ id: "1", name: `main.${languages[lang]?.ext || "js"}`, type: "file", language: lang, content: getBoilerplate(lang) }];
+        setFiles(wsFiles);
+        setActiveFileId(wsFiles[0].id);
+        setOpenTabs(wsFiles.slice(0, 1).map(f => ({ id: f.id, name: f.name, language: f.language, type: "file" })));
+        setActiveTabId(wsFiles[0].id);
         setIsLoading(false);
-        return;
+      } catch (err) {
+        if (cancelled) return;
+        // Fallback: try localStorage
+        const savedWorkspaces = localStorage.getItem("syncide_workspaces");
+        if (savedWorkspaces) {
+          const workspaces = JSON.parse(savedWorkspaces);
+          const ws = workspaces.find(w => w.id === workspaceId);
+          if (ws) {
+            setWorkspace(ws);
+            setSelectedLanguage(ws.language || "javascript");
+            const savedCode = localStorage.getItem(`syncide_code_${workspaceId}`);
+            const initialFile = { id: "1", name: `main.${languages[ws.language]?.ext || "js"}`, type: "file", language: ws.language || "javascript", content: savedCode || getBoilerplate(ws.language || "javascript") };
+            setFiles([initialFile]);
+            setOpenTabs([{ id: "1", name: initialFile.name, language: initialFile.language, type: "file" }]);
+            setIsLoading(false);
+            return;
+          }
+        }
+        // Create default workspace
+        const lang = "javascript";
+        const defaultWorkspace = { id: workspaceId, name: `Workspace ${workspaceId?.slice(0, 6) || "New"}`, type: "plain", language: lang, color: "#10b981" };
+        setWorkspace(defaultWorkspace);
+        const initialFile = { id: "1", name: "main.js", type: "file", language: lang, content: getBoilerplate(lang) };
+        setFiles([initialFile]);
+        setOpenTabs([{ id: "1", name: "main.js", language: lang, type: "file" }]);
+        setIsLoading(false);
       }
-    }
-    
-    // Workspace not found - create a default one
-    const defaultWorkspace = {
-      id: workspaceId,
-      name: `Workspace ${workspaceId?.slice(0, 6) || "New"}`,
-      type: "plain",
-      language: "javascript",
-      color: "#10b981",
-      createdAt: new Date().toISOString(),
-      lastOpened: new Date().toISOString()
     };
-    
-    const existingWorkspaces = JSON.parse(localStorage.getItem("syncide_workspaces") || "[]");
-    existingWorkspaces.push(defaultWorkspace);
-    localStorage.setItem("syncide_workspaces", JSON.stringify(existingWorkspaces));
-    
-    const initialFile = {
-      id: "1",
-      name: "main.js",
-      type: "file",
-      language: "javascript",
-      content: getBoilerplate("javascript"),
-    };
-    setFiles([initialFile]);
-    setOpenTabs([{ id: "1", name: "main.js", language: "javascript", type: "file" }]);
-    setWorkspace(defaultWorkspace);
-    setIsLoading(false);
+    loadWorkspace();
+    return () => { cancelled = true; };
   }, [workspaceId]);
 
-  // Auto-save code
+  // Save to backend API debounced
+  const saveToBackend = useCallback(async (currentFiles) => {
+    if (!workspaceId) return;
+    try {
+      await workspaceAPI.update(workspaceId, { files: currentFiles });
+      // Also save to localStorage as backup
+      const af = currentFiles.find(f => f.id === activeFileId) || currentFiles[0];
+      if (af) localStorage.setItem(`syncide_code_${workspaceId}`, af.content);
+      setIsSaved(true);
+      setSaveError(null);
+    } catch (err) {
+      // Fallback to localStorage only
+      const af = currentFiles.find(f => f.id === activeFileId) || currentFiles[0];
+      if (af) localStorage.setItem(`syncide_code_${workspaceId}`, af.content);
+      setIsSaved(true);
+    }
+  }, [workspaceId, activeFileId]);
+
+  // Auto-save code with debounce
   useEffect(() => {
     if (!isSaved && workspace && files.length > 0) {
-      const timer = setTimeout(() => {
-        const activeFile = files.find(f => f.id === activeFileId);
-        if (activeFile) {
-          localStorage.setItem(`syncide_code_${workspaceId}`, activeFile.content);
-          setIsSaved(true);
-        }
-      }, 1000);
+      const timer = setTimeout(() => saveToBackend(files), 1500);
       return () => clearTimeout(timer);
     }
-  }, [files, isSaved, workspaceId, workspace, activeFileId]);
+  }, [files, isSaved, workspace, saveToBackend]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts (Ctrl+S)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
-        const activeFile = files.find(f => f.id === activeFileId);
-        if (activeFile) {
-          localStorage.setItem(`syncide_code_${workspaceId}`, activeFile.content);
-          setIsSaved(true);
-        }
+        saveToBackend(files);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [files, workspaceId, activeFileId]);
+  }, [files, saveToBackend]);
 
   // Find file by ID
   const findFile = (id) => files.find(f => f.id === id);
@@ -375,53 +394,30 @@ export default function PlainEditorPage() {
     }
   };
 
-  // Run code
+  // Run code — uses /api/execute endpoint
   const runCode = async () => {
     if (!activeFile || isExecuting) return;
-    
     setShowTerminal(true);
     setIsExecuting(true);
-    
     const code = editorRef.current?.getValue() || activeFile.content || "";
     const language = activeFile.language;
-    
-    setTerminalOutput(prev => prev + `\n$ Running ${activeFile.name}...\n`);
-    
+    setRunOutput(prev => prev + `\n▶ Running ${activeFile.name}...\n`);
     try {
-      const response = await fetch(`${import.meta.env.VITE_SOCKET_URL || "http://localhost:5000"}/execute`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ code, language }),
-      });
-      
-      const result = await response.json();
-      
+      const result = await executeAPI.run(code, language);
       if (result.error && !result.output) {
-        setTerminalOutput(prev => prev + `❌ Error:\n${result.error}\n\n$ `);
+        setRunOutput(prev => prev + `❌ Error:\n${result.error}\n`);
       } else {
         const output = result.output || "(No output)";
-        const errorOutput = result.error ? `\n⚠️ Stderr:\n${result.error}` : "";
+        const errOut = result.error ? `\n⚠️ Stderr:\n${result.error}` : "";
         const status = result.success ? "✅" : "❌";
-        const duration = (result.duration / 1000).toFixed(2);
-        
-        setTerminalOutput(prev => 
-          prev + `${output}${errorOutput}\n\n${status} Completed in ${duration}s (exit code: ${result.exitCode})\n\n$ `
-        );
+        const dur = ((result.duration || 0) / 1000).toFixed(2);
+        setRunOutput(prev => prev + `${output}${errOut}\n${status} Completed in ${dur}s (exit: ${result.exitCode})\n`);
       }
     } catch (err) {
-      setTerminalOutput(prev => 
-        prev + `❌ Failed to execute: ${err.message}\n\nMake sure the backend server is running\n\n$ `
-      );
+      setRunOutput(prev => prev + `❌ Failed: ${err.message}\nMake sure the backend server is running.\n`);
     } finally {
       setIsExecuting(false);
     }
-  };
-
-  // Clear terminal
-  const clearTerminal = () => {
-    setTerminalOutput("Terminal cleared\n$ ");
   };
 
   if (isLoading) {
@@ -462,8 +458,8 @@ export default function PlainEditorPage() {
                   src={logo}
                   alt="SyncIDE"
                   className="w-10 h-10 object-contain"
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
+                  whileHover={{ rotate: 180, scale: 1.1 }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
                 />
                 <div className="absolute inset-0 bg-emerald-500/20 blur-xl rounded-full" />
               </div>
@@ -506,7 +502,7 @@ export default function PlainEditorPage() {
                 whileTap={{ scale: 0.98 }}
               >
                 <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 via-cyan-500 to-blue-500 flex items-center justify-center text-sm font-bold text-white shadow-lg">
-                  SB
+                  {userInitials}
                 </div>
                 <ChevronDownIcon />
               </motion.button>
@@ -524,11 +520,11 @@ export default function PlainEditorPage() {
                     <div className="p-4 border-b border-white/[0.05]">
                       <div className="flex items-center gap-3">
                         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-400 via-cyan-500 to-blue-500 flex items-center justify-center text-base font-bold text-white shadow-lg">
-                          SB
+                          {userInitials}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-white truncate">Soham Bhattacharjee</p>
-                          <p className="text-xs text-white/40 truncate">soham@example.com</p>
+                          <p className="text-sm font-bold text-white truncate">{userName}</p>
+                          <p className="text-xs text-white/40 truncate">{authUser?.email || ''}</p>
                         </div>
                       </div>
                       <div className="mt-3 flex items-center gap-2">
@@ -793,62 +789,19 @@ export default function PlainEditorPage() {
             {activeTabId === "tool-api" && <APIWorkspace />}
           </div>
 
-          {/* Terminal */}
-          <AnimatePresence>
-            {showTerminal && (
-              <motion.div
-                initial={{ height: 0 }}
-                animate={{ height: 200 }}
-                exit={{ height: 0 }}
-                className="bg-[#0a0a0c] border-t border-[#1e1e24] overflow-hidden flex flex-col"
-              >
-                {/* Terminal Header */}
-                <div className="h-9 flex items-center justify-between px-4 bg-[#0d0d10] border-b border-[#1e1e24] shrink-0">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      <TerminalIcon />
-                      <span className="text-white/70 text-xs font-medium">Terminal</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] font-medium rounded-full border border-emerald-500/20">
-                        zsh
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {isExecuting && (
-                      <span className="px-2 py-0.5 bg-yellow-500/10 text-yellow-400 text-[10px] font-medium rounded-full border border-yellow-500/20 animate-pulse">
-                        Running...
-                      </span>
-                    )}
-                    <button 
-                      onClick={clearTerminal} 
-                      className="p-1.5 hover:bg-white/5 rounded text-white/40 hover:text-white/70 transition-colors"
-                      title="Clear Terminal"
-                    >
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/>
-                      </svg>
-                    </button>
-                    <button 
-                      onClick={() => setShowTerminal(false)} 
-                      className="p-1.5 hover:bg-white/5 rounded text-white/40 hover:text-white/70 transition-colors"
-                      title="Close Terminal"
-                    >
-                      <CloseIcon />
-                    </button>
-                  </div>
-                </div>
-                {/* Terminal Output */}
-                <div className="flex-1 overflow-auto p-4 font-mono text-sm text-gray-300 whitespace-pre-wrap leading-relaxed bg-[#0a0a0c]">
-                  {terminalOutput}
-                  {isExecuting && (
-                    <span className="inline-block w-2 h-4 bg-emerald-400 animate-pulse ml-0.5" />
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* Terminal — Interactive shell via socket */}
+          {(() => {
+            const Terminal = require("../components/Terminal").default;
+            return (
+              <Terminal
+                isOpen={showTerminal}
+                onToggle={() => setShowTerminal(!showTerminal)}
+                roomId={workspaceId}
+                runOutput={runOutput}
+                isExecuting={isExecuting}
+              />
+            );
+          })()}
         </div>
       </div>
 

@@ -18,12 +18,34 @@ const setupSocket = require("./socket");
 
 // Initialize app
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+// CORS — allow frontend origins
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  process.env.CLIENT_URL,
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (Postman, curl) or matching origin
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, true); // Allow all in dev; restrict in prod
+      }
+    },
+    credentials: true,
+  })
+);
+
+app.use(express.json({ limit: "5mb" }));
+app.use(express.urlencoded({ extended: true }));
 
 // Health check
 app.get("/", (req, res) => {
-  res.send("SyncIDE backend with WebSocket running 🚀");
+  res.json({ status: "ok", message: "SyncIDE backend running 🚀" });
 });
 
 // Mount API routes
@@ -35,7 +57,11 @@ app.use("/api/execute", executeRoutes);
 // Create HTTP server & attach Socket.IO
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*" },
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+  transports: ["websocket", "polling"],
 });
 
 // Setup socket handlers
@@ -46,6 +72,6 @@ const PORT = process.env.PORT || 5000;
 
 connectDB().then(() => {
   server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`✅ Server running on port ${PORT}`);
   });
 });

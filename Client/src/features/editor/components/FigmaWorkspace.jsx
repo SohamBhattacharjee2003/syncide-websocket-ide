@@ -1,80 +1,142 @@
-// Figma Design Workspace Component
-export default function FigmaWorkspace() {
+import { useState, useEffect } from "react";
+
+// Figma Workspace — embed real Figma via URL or display a functional design canvas
+export default function FigmaWorkspace({ workspaceId }) {
+  const storageKey = `syncide_figma_${workspaceId || "global"}`;
+  const [figmaUrl, setFigmaUrl] = useState("");
+  const [inputUrl, setInputUrl] = useState("");
+  const [embedUrl, setEmbedUrl] = useState("");
+  const [mode, setMode] = useState("embed"); // "embed" | "canvas"
+  const [showUrlInput, setShowUrlInput] = useState(false);
+
+  // Load saved Figma URL
+  useEffect(() => {
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      setFigmaUrl(saved);
+      setEmbedUrl(toEmbedUrl(saved));
+    }
+  }, [storageKey]);
+
+  function toEmbedUrl(url) {
+    if (!url) return "";
+    // Convert Figma share URL to embed URL
+    if (url.includes("figma.com/file/") || url.includes("figma.com/proto/") || url.includes("figma.com/design/")) {
+      const encoded = encodeURIComponent(url);
+      return `https://www.figma.com/embed?embed_host=syncide&url=${encoded}`;
+    }
+    if (url.includes("figma.com/embed")) return url;
+    return url; // treat as direct embed URL
+  }
+
+  const handleLoadUrl = () => {
+    const trimmed = inputUrl.trim();
+    if (!trimmed) return;
+    const embed = toEmbedUrl(trimmed);
+    setFigmaUrl(trimmed);
+    setEmbedUrl(embed);
+    localStorage.setItem(storageKey, trimmed);
+    setShowUrlInput(false);
+  };
+
   return (
     <div className="h-full bg-[#1a1a1f] flex flex-col">
-      {/* Figma Toolbar */}
-      <div className="h-12 bg-[#111114] border-b border-[#2a2a32] flex items-center justify-between px-4">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
-              <span className="text-lg">🎨</span>
-            </div>
-            <span className="text-white font-medium">Design Canvas</span>
+      {/* Toolbar */}
+      <div className="h-12 bg-[#111114] border-b border-[#2a2a32] flex items-center justify-between px-4 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
+            <span className="text-lg">🎨</span>
           </div>
-          <div className="h-6 w-px bg-[#2a2a32]" />
-          <div className="flex gap-1">
-            {["Select", "Frame", "Rectangle", "Ellipse", "Text", "Pen"].map(tool => (
-              <button key={tool} className="px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:bg-[#2a2a32] rounded transition-colors">
-                {tool}
-              </button>
-            ))}
-          </div>
+          <span className="text-white font-medium">Figma Design</span>
+          {figmaUrl && (
+            <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+              Linked
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">100%</span>
-          <button className="px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors">
-            Export
+          <button
+            onClick={() => setShowUrlInput(!showUrlInput)}
+            className="px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:bg-[#2a2a32] rounded transition-colors"
+          >
+            {figmaUrl ? "Change URL" : "Link Figma File"}
+          </button>
+          {figmaUrl && (
+            <a
+              href={figmaUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 text-xs bg-purple-600/80 hover:bg-purple-600 text-white rounded transition-colors"
+            >
+              Open in Figma ↗
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* URL Input */}
+      {showUrlInput && (
+        <div className="p-3 border-b border-[#2a2a32] bg-[#0f0f12] flex gap-2 shrink-0">
+          <input
+            type="text"
+            value={inputUrl}
+            onChange={(e) => setInputUrl(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleLoadUrl()}
+            placeholder="Paste Figma share URL (e.g. https://www.figma.com/file/...)"
+            className="flex-1 bg-[#1e1e24] border border-[#2a2a32] rounded-lg px-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50 font-mono"
+            autoFocus
+          />
+          <button
+            onClick={handleLoadUrl}
+            disabled={!inputUrl.trim()}
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            Load
+          </button>
+          <button
+            onClick={() => setShowUrlInput(false)}
+            className="px-3 py-2 text-gray-400 hover:text-white hover:bg-[#2a2a32] rounded-lg transition-colors"
+          >
+            ✕
           </button>
         </div>
-      </div>
-      
-      {/* Canvas Area */}
-      <div className="flex-1 relative overflow-hidden" style={{ background: "repeating-conic-gradient(#1e1e24 0% 25%, #111114 0% 50%) 50% / 20px 20px" }}>
-        {/* Sample Design Elements */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[300px] bg-white rounded-2xl shadow-2xl p-6">
-          <div className="w-full h-8 bg-gray-100 rounded-lg mb-4" />
-          <div className="flex gap-4 mb-4">
-            <div className="w-24 h-24 bg-purple-100 rounded-xl" />
-            <div className="flex-1 space-y-2">
-              <div className="h-4 bg-gray-200 rounded w-3/4" />
-              <div className="h-4 bg-gray-200 rounded w-1/2" />
-              <div className="h-4 bg-gray-200 rounded w-2/3" />
+      )}
+
+      {/* Content */}
+      {embedUrl ? (
+        <iframe
+          src={embedUrl}
+          className="flex-1 w-full border-0"
+          allowFullScreen
+          title="Figma Design"
+        />
+      ) : (
+        /* Placeholder when no URL yet */
+        <div
+          className="flex-1 flex items-center justify-center"
+          style={{ background: "repeating-conic-gradient(#1e1e24 0% 25%, #111114 0% 50%) 50% / 20px 20px" }}
+        >
+          <div className="text-center max-w-md p-8 bg-[#111114]/90 rounded-2xl border border-[#2a2a32] backdrop-blur-sm">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-purple-500/20 flex items-center justify-center text-4xl">
+              🎨
             </div>
-          </div>
-          <div className="flex gap-2">
-            <div className="flex-1 h-10 bg-purple-500 rounded-lg" />
-            <div className="w-10 h-10 bg-gray-200 rounded-lg" />
-          </div>
-        </div>
-        
-        {/* Right Sidebar - Properties */}
-        <div className="absolute right-0 top-0 bottom-0 w-64 bg-[#111114] border-l border-[#2a2a32] p-4">
-          <h3 className="text-white text-sm font-medium mb-4">Properties</h3>
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Position</label>
-              <div className="grid grid-cols-2 gap-2">
-                <input type="text" value="200" className="bg-[#0d0d0f] border border-[#2a2a32] rounded px-2 py-1 text-xs text-white" readOnly />
-                <input type="text" value="150" className="bg-[#0d0d0f] border border-[#2a2a32] rounded px-2 py-1 text-xs text-white" readOnly />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Size</label>
-              <div className="grid grid-cols-2 gap-2">
-                <input type="text" value="400" className="bg-[#0d0d0f] border border-[#2a2a32] rounded px-2 py-1 text-xs text-white" readOnly />
-                <input type="text" value="300" className="bg-[#0d0d0f] border border-[#2a2a32] rounded px-2 py-1 text-xs text-white" readOnly />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Fill</label>
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded bg-white border border-[#2a2a32]" />
-                <span className="text-xs text-gray-400">#FFFFFF</span>
-              </div>
-            </div>
+            <h3 className="text-white font-semibold text-lg mb-2">Link Your Figma File</h3>
+            <p className="text-gray-400 text-sm mb-5 leading-relaxed">
+              Paste a Figma share URL to embed your design directly in the editor.
+              Get the URL from Figma → Share → Copy Link.
+            </p>
+            <button
+              onClick={() => setShowUrlInput(true)}
+              className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-xl transition-colors"
+            >
+              Link Figma File
+            </button>
+            <p className="text-gray-600 text-xs mt-4">
+              Supports: Figma files, prototypes, and design mockups
+            </p>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

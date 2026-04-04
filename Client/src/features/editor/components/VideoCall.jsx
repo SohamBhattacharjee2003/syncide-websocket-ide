@@ -110,27 +110,38 @@ const VideoTile = ({
 };
 
 // Control button component
-const ControlButton = ({ icon: IconComponent, label, onClick, active, danger, disabled }) => (
-  <motion.button
-    onClick={onClick}
-    disabled={disabled}
-    className={`
-      relative flex flex-col items-center gap-1 p-3 rounded-xl transition-all
-      ${disabled ? "opacity-50 cursor-not-allowed" : ""}
-      ${danger 
-        ? "bg-red-500/20 text-red-400 hover:bg-red-500/30" 
-        : active 
-          ? "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
-          : "bg-white/5 text-neutral-400 hover:bg-white/10 hover:text-white"
-      }
-    `}
-    whileHover={!disabled ? { scale: 1.05 } : {}}
-    whileTap={!disabled ? { scale: 0.95 } : {}}
-  >
-    <IconComponent className="w-5 h-5" />
-    <span className="text-[10px] font-medium">{label}</span>
-  </motion.button>
-);
+const ControlButton = ({ icon: IconComponent, label, onClick, active, danger, disabled }) => {
+  const handleClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!disabled && onClick) {
+      console.log(`[ControlButton] Clicked: ${label}`);
+      onClick();
+    }
+  };
+
+  return (
+    <motion.button
+      onClick={handleClick}
+      disabled={disabled}
+      className={`
+        relative flex flex-col items-center gap-1 p-3 rounded-xl transition-all
+        ${disabled ? "opacity-50 cursor-not-allowed" : ""}
+        ${danger 
+          ? "bg-red-500/20 text-red-400 hover:bg-red-500/30" 
+          : active 
+            ? "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
+            : "bg-white/5 text-neutral-400 hover:bg-white/10 hover:text-white"
+        }
+      `}
+      whileHover={!disabled ? { scale: 1.05 } : {}}
+      whileTap={!disabled ? { scale: 0.95 } : {}}
+    >
+      <IconComponent className="w-5 h-5" />
+      <span className="text-[10px] font-medium">{label}</span>
+    </motion.button>
+  );
+};
 
 export default function VideoCall({
   isOpen,
@@ -156,7 +167,11 @@ export default function VideoCall({
   const [isRecording, setIsRecording] = useState(false);
   const [handRaised, setHandRaised] = useState(false);
 
-  const participants = Object.entries(remoteStreams);
+  const participants = Array.isArray(remoteStreams) 
+    ? remoteStreams 
+    : remoteStreams instanceof Map 
+      ? Array.from(remoteStreams.entries())
+      : Object.entries(remoteStreams);
 
   if (!isOpen) return null;
 
@@ -192,21 +207,36 @@ export default function VideoCall({
           {/* Mini controls */}
           <div className="flex items-center justify-center gap-2 p-2 bg-black/40">
             <motion.button
-              onClick={onToggleMic}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log("[VideoCall] Mic button clicked");
+                onToggleMic?.();
+              }}
               className={`p-2 rounded-full ${isMicOn ? "bg-white/10" : "bg-red-500/20 text-red-400"}`}
               whileTap={{ scale: 0.9 }}
             >
               {isMicOn ? <VscUnmute className="w-4 h-4" /> : <VscMute className="w-4 h-4" />}
             </motion.button>
             <motion.button
-              onClick={onToggleCamera}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log("[VideoCall] Camera button clicked");
+                onToggleCamera?.();
+              }}
               className={`p-2 rounded-full ${isCameraOn ? "bg-white/10" : "bg-red-500/20 text-red-400"}`}
               whileTap={{ scale: 0.9 }}
             >
               {isCameraOn ? <HiOutlineVideoCamera className="w-4 h-4" /> : <HiOutlineVideoCameraSlash className="w-4 h-4" />}
             </motion.button>
             <motion.button
-              onClick={onEndCall}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log("[VideoCall] End call button clicked");
+                onEndCall?.();
+              }}
               className="p-2 rounded-full bg-red-500 text-white"
               whileTap={{ scale: 0.9 }}
             >
@@ -304,16 +334,21 @@ export default function VideoCall({
                 )}
 
                 {/* Remote participants */}
-                {participants.map(([oderId, stream]) => (
-                  <div key={oderId} className="group">
-                    <VideoTile
-                      stream={stream}
-                      name={users.find(u => u.id === oderId)?.name || "Participant"}
-                      isPinned={pinnedUser === oderId}
-                      onPin={() => setPinnedUser(pinnedUser === oderId ? null : oderId)}
-                    />
-                  </div>
-                ))}
+                {participants.map(([peerId, data]) => {
+                  const stream = data?.stream ?? data;
+                  const isMuted = data?.isMicOn === false;
+                  return (
+                    <div key={peerId} className="group">
+                      <VideoTile
+                        stream={stream}
+                        name={users.find(u => u.id === peerId)?.name || "Participant"}
+                        isMuted={isMuted}
+                        isPinned={pinnedUser === peerId}
+                        onPin={() => setPinnedUser(pinnedUser === peerId ? null : peerId)}
+                      />
+                    </div>
+                  );
+                })}
 
                 {/* Empty state */}
                 {participants.length === 0 && !localStream && (
@@ -331,7 +366,7 @@ export default function VideoCall({
               <div className="w-full h-full flex gap-3">
                 <div className="flex-1">
                   <VideoTile
-                    stream={remoteStreams[pinnedUser]}
+                    stream={remoteStreams instanceof Map ? remoteStreams.get(pinnedUser)?.stream : remoteStreams[pinnedUser]?.stream}
                     name={users.find(u => u.id === pinnedUser)?.name || "Participant"}
                     isPinned
                     size="large"
@@ -347,13 +382,13 @@ export default function VideoCall({
                   />
                   {participants
                     .filter(([id]) => id !== pinnedUser)
-                    .map(([oderId, stream]) => (
+                    .map(([peerId, data]) => (
                       <VideoTile
-                        key={oderId}
-                        stream={stream}
-                        name={users.find(u => u.id === oderId)?.name || "Participant"}
+                        key={peerId}
+                        stream={data?.stream ?? data}
+                        name={users.find(u => u.id === peerId)?.name || "Participant"}
                         size="small"
-                        onPin={() => setPinnedUser(oderId)}
+                        onPin={() => setPinnedUser(peerId)}
                       />
                     ))}
                 </div>

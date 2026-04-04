@@ -46,7 +46,12 @@ export default function TopBar({
   onToggleTerminal,
   isSyncing = false,
   lastSaved = null,
+  user = null,
 }) {
+  // Derive real user display from prop
+  const displayName = user?.username || user?.name || "User";
+  const displayEmail = user?.email || "";
+  const initials = displayName.split(" ").map(s => s[0]).join("").toUpperCase().slice(0, 2) || "U";
   const [copied, setCopied] = useState(false);
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -88,17 +93,14 @@ export default function TopBar({
           className="flex items-center gap-2 cursor-pointer"
           whileHover={{ scale: 1.02 }}
         >
+          {/* Performance fix: rotate only on hover, not continuously */}
           <motion.div
             className="w-7 h-7 md:w-8 md:h-8 rounded-lg overflow-hidden flex items-center justify-center"
-            animate={{ 
-              rotate: 360,
-              boxShadow: ["0 0 10px rgba(16,185,129,0.3)", "0 0 20px rgba(16,185,129,0.5)", "0 0 10px rgba(16,185,129,0.3)"]
+            whileHover={{ 
+              rotate: 180,
+              boxShadow: "0 0 20px rgba(16,185,129,0.5)"
             }}
-            transition={{ 
-              rotate: { duration: 8, repeat: Infinity, ease: "linear" },
-              boxShadow: { duration: 2, repeat: Infinity }
-            }}
-            whileHover={{ rotate: 0, scale: 1.1 }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
           >
             <motion.img 
               src={logoImg} 
@@ -431,7 +433,7 @@ export default function TopBar({
             whileTap={{ scale: 0.98 }}
           >
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center text-xs font-bold text-white">
-              S
+              {initials}
             </div>
             <VscChevronDown className={`w-3 h-3 text-neutral-400 transition-transform hidden md:block ${showAccountMenu ? "rotate-180" : ""}`} />
           </motion.button>
@@ -444,15 +446,15 @@ export default function TopBar({
                 exit={{ opacity: 0, y: -10, scale: 0.95 }}
                 className="absolute top-full right-0 mt-2 bg-neutral-900 border border-white/10 rounded-xl shadow-2xl w-64 z-50 overflow-hidden"
               >
-                {/* User Info */}
+                {/* User Info - real data */}
                 <div className="p-4 border-b border-white/5">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center text-sm font-bold text-white">
-                      SB
+                      {initials}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white truncate">Soham Bhattacharjee</p>
-                      <p className="text-xs text-neutral-400 truncate">soham@example.com</p>
+                      <p className="text-sm font-medium text-white truncate">{displayName}</p>
+                      <p className="text-xs text-neutral-400 truncate">{displayEmail}</p>
                     </div>
                   </div>
                   <div className="mt-3 flex items-center gap-2">

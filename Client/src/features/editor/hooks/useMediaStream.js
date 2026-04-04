@@ -1,12 +1,16 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
 /**
- * useMediaStream — manages local mic, camera, and screen sharing streams.
+ * useMediaStream — manages local mic, camera, and screen sharing.
  *
- * KEY: Auto-acquires a MUTED audio stream on mount so that WebRTC peer
- * connections always have a real audio track from the start.
+ * KEY DESIGN (mirrors Google Meet):
+ *   - One persistent MediaStream object is created on mount.
+ *   - Audio/Video tracks are added when user enables them.
+ *   - Tracks are enabled/disabled via track.enabled toggle.
+ *   - Screen tracks: separate stream, added/removed from WebRTC via a separate ref.
  */
 export default function useMediaStream() {
+  const persistentStreamRef = useRef(null); // The one stream handed to WebRTC
   const [localStream, setLocalStream] = useState(null);
   const [screenStream, setScreenStream] = useState(null);
   const [isMicOn, setIsMicOn] = useState(false);
@@ -14,127 +18,160 @@ export default function useMediaStream() {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const localVideoRef = useRef(null);
 
-  // ★ Auto-acquire mic on mount (muted) so WebRTC always has an audio track
+  // ── Initialize on mount: create empty stream ──
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: false,
-        });
-        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
-        // Start muted — user clicks mic button to unmute
-        stream.getAudioTracks().forEach((t) => (t.enabled = false));
-        setLocalStream(stream);
-        setIsMicOn(false);
-        console.log("[useMediaStream] auto-acquired muted mic stream");
-      } catch (err) {
-        console.warn("[useMediaStream] could not auto-acquire mic:", err.message);
-      }
-    })();
-    return () => { cancelled = true; };
+    const stream = new MediaStream();
+    persistentStreamRef.current = stream;
+    setLocalStream(stream);
+    console.log("[useMediaStream] empty persistent stream created");
+
+    return () => {
+      persistentStreamRef.current?.getTracks().forEach((t) => t.stop());
+    };
   }, []);
 
-  // Start mic + camera (used when toggling camera ON or replacing stream)
-  const startMedia = useCallback(async ({ audio = true, video = true } = {}) => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio, video });
-      // Stop old tracks before replacing
-      if (localStream) {
-        localStream.getTracks().forEach((t) => t.stop());
-      }
-      setLocalStream(stream);
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-      setIsMicOn(audio);
-      setIsCameraOn(video);
-      return stream;
-    } catch (err) {
-      console.error("[useMediaStream] getUserMedia failed:", err);
-      return null;
-    }
-  }, [localStream]);
-
-  // Toggle microphone — just flips track.enabled (no new stream needed)
-  const toggleMic = useCallback(() => {
-    if (!localStream) {
-      startMedia({ audio: true, video: isCameraOn });
+  // ── Toggle microphone ──
+  const toggleMic = useCallback(async () => {
+    console.log("[useMediaStream.toggleMic] Called");
+    const stream = persistentStreamRef.current;
+    if (!stream) {
+      console.error("[useMediaStream] No stream available");
       return;
     }
-    const audioTracks = localStream.getAudioTracks();
+
+    const audioTracks = stream.getAudioTracks();
+
     if (audioTracks.length === 0) {
-      startMedia({ audio: true, video: isCameraOn });
-      return;
-    }
-    const newState = !audioTracks[0].enabled;
-    audioTracks.forEach((t) => (t.enabled = newState));
-    setIsMicOn(newState);
-  }, [localStream, isCameraOn, startMedia]);
+      // First time - acquire audio
+      try {
+        console.log("[useMediaStream] Requesting audio permission...");
+        const audioStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: { echoCancellation: true, noiseSuppression: true } 
+        });
+        
+        if (audioStream.getAudioTracks().length === 0) {
+          console.error("[useMediaStream] No audio tracks obtained");
+          return;
+        }
 
-  // Toggle camera
-  const toggleCamera = useCallback(() => {
-    if (!localStream) {
-      startMedia({ audio: isMicOn, video: true });
-      return;
+        audioStream.getAudioTracks().forEach((t) => {
+          t.enabled = true;
+          stream.addTrack(t);
+        });
+        
+        setIsMicOn(true);
+        setLocalStream(new MediaStream(stream.getTracks()));
+        console.log("[useMediaStream] audio track added, isMicOn set to true");
+      } catch (err) {
+        console.error("[useMediaStream] Cannot access mic:", err);
+        setIsMicOn(false);
+      }
+    } else {
+      // Toggle existing audio
+      const newState = !audioTracks[0].enabled;
+      audioTracks.forEach((t) => (t.enabled = newState));
+      setIsMicOn(newState);
+      console.log(`[useMediaStream] mic toggled to ${newState}`);
     }
-    const videoTracks = localStream.getVideoTracks();
-    if (videoTracks.length === 0) {
-      // Need to get a new stream with video
-      startMedia({ audio: isMicOn, video: true });
-      return;
-    }
-    const newState = !videoTracks[0].enabled;
-    videoTracks.forEach((t) => (t.enabled = newState));
-    setIsCameraOn(newState);
-  }, [localStream, isMicOn, startMedia]);
+  }, []);
 
-  // Toggle screen sharing
+  // ── Toggle camera ──
+  const toggleCamera = useCallback(async () => {
+    console.log("[useMediaStream.toggleCamera] Called");
+    const stream = persistentStreamRef.current;
+    if (!stream) {
+      console.error("[useMediaStream] No stream available");
+      return;
+    }
+
+    const videoTracks = stream.getVideoTracks();
+
+    if (videoTracks.length > 0) {
+      // Camera track exists — toggle enabled state
+      const newState = !videoTracks[0].enabled;
+      videoTracks.forEach((t) => (t.enabled = newState));
+      setIsCameraOn(newState);
+      setLocalStream(new MediaStream(stream.getTracks()));
+      console.log(`[useMediaStream] camera toggled to ${newState}`);
+    } else {
+      // First time — acquire camera
+      try {
+        console.log("[useMediaStream] Requesting camera permission...");
+        const videoStream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          } 
+        });
+
+        if (videoStream.getVideoTracks().length === 0) {
+          console.error("[useMediaStream] No video tracks obtained");
+          return;
+        }
+
+        videoStream.getVideoTracks().forEach((t) => {
+          t.enabled = true;
+          stream.addTrack(t);
+        });
+
+        setIsCameraOn(true);
+        
+        // Update local video preview
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+
+        setLocalStream(new MediaStream(stream.getTracks()));
+        console.log("[useMediaStream] camera track added, isCameraOn set to true");
+      } catch (err) {
+        console.error("[useMediaStream] Cannot access camera:", err);
+        setIsCameraOn(false);
+      }
+    }
+  }, []);
+
+  // ── Toggle screen sharing ──
   const toggleScreenShare = useCallback(async () => {
+    console.log("[useMediaStream.toggleScreenShare] Called, isScreenSharing:", isScreenSharing);
     if (isScreenSharing && screenStream) {
+      console.log("[useMediaStream] Stopping screen share");
       screenStream.getTracks().forEach((t) => t.stop());
       setScreenStream(null);
       setIsScreenSharing(false);
       return null;
     }
     try {
+      console.log("[useMediaStream] Starting screen share");
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { cursor: "always" },
         audio: false,
       });
       stream.getVideoTracks()[0].addEventListener("ended", () => {
+        console.log("[useMediaStream] Screen share ended");
         setScreenStream(null);
         setIsScreenSharing(false);
       });
       setScreenStream(stream);
       setIsScreenSharing(true);
+      console.log("[useMediaStream] Screen share started");
       return stream;
     } catch (err) {
-      console.error("[useMediaStream] getDisplayMedia failed:", err);
+      console.error("[useMediaStream] Screen share failed:", err);
       return null;
     }
   }, [isScreenSharing, screenStream]);
 
-  // Cleanup
+  // ── Stop all ──
   const stopAll = useCallback(() => {
-    if (localStream) {
-      localStream.getTracks().forEach((t) => t.stop());
-      setLocalStream(null);
-    }
-    if (screenStream) {
-      screenStream.getTracks().forEach((t) => t.stop());
-      setScreenStream(null);
-    }
+    persistentStreamRef.current?.getTracks().forEach((t) => t.stop());
+    persistentStreamRef.current = null;
+    setLocalStream(null);
+    screenStream?.getTracks().forEach((t) => t.stop());
+    setScreenStream(null);
     setIsMicOn(false);
     setIsCameraOn(false);
     setIsScreenSharing(false);
-  }, [localStream, screenStream]);
-
-  useEffect(() => {
-    return () => stopAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [screenStream]);
 
   return {
     localStream,

@@ -955,8 +955,10 @@ export default function DashboardPage() {
         
         setWorkspaces(workspacesRes.workspaces || []);
         setDashboardStats(statsRes.stats || null);
-        setWeeklyActivity(activityRes.activityData || activityData);
-        setLanguages(languagesRes.languageData || languageData);
+        // Fix: backend returns { activity: [...] } not { activityData: [...] }
+        setWeeklyActivity(activityRes.activity?.length ? activityRes.activity : activityData);
+        // Fix: backend returns { languages: [...] } not { languageData: [...] }
+        setLanguages(languagesRes.languages?.length ? languagesRes.languages : languageData);
         setActivities(activitiesRes.activities || recentActivity);
       } catch (err) {
         console.error("Failed to fetch dashboard data:", err);
@@ -1052,11 +1054,12 @@ export default function DashboardPage() {
   if (isLoading) return <LoadingScreen />;
   if (!user) return null;
 
+  // Fix: use real dashboardStats from API, fall back to derived values
   const stats = [
-    { icon: "📁", label: "Workspaces", value: workspaces.length, change: 12, color: "from-emerald-500 to-cyan-500" },
-    { icon: "⚡", label: "Live Sessions", value: workspaces.filter(w => w.type === "realtime").length, change: 8, color: "from-cyan-500 to-blue-500" },
-    { icon: "📝", label: "Lines of Code", value: 12847, change: 24, color: "from-violet-500 to-purple-500" },
-    { icon: "👥", label: "Collaborators", value: 23, change: -3, color: "from-amber-500 to-orange-500" },
+    { icon: "📁", label: "Workspaces", value: dashboardStats?.totalWorkspaces ?? workspaces.length, change: null, color: "from-emerald-500 to-cyan-500" },
+    { icon: "⭐", label: "Starred", value: dashboardStats?.starredWorkspaces ?? workspaces.filter(w => w.starred).length, change: null, color: "from-cyan-500 to-blue-500" },
+    { icon: "📝", label: "Lines of Code", value: dashboardStats?.linesOfCode ?? workspaces.length * 42, change: null, color: "from-violet-500 to-purple-500" },
+    { icon: "👥", label: "Collaborators", value: dashboardStats?.collaborators ?? 0, change: null, color: "from-amber-500 to-orange-500" },
   ];
 
   return (
@@ -1225,16 +1228,18 @@ export default function DashboardPage() {
                   <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="lg:col-span-2 p-4 bg-[#0c0c0f] border border-white/5 rounded-xl">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="font-semibold text-white text-sm">Weekly Activity</h3>
-                      <span className="text-xs text-emerald-400">+18%</span>
+                      <span className="text-xs text-white/40 font-mono">Last 7 days</span>
                     </div>
-                    <FuturisticBarChart data={activityData} height={140} />
+                    {/* Fix: use weeklyActivity state (real data) not hardcoded activityData */}
+                    <FuturisticBarChart data={weeklyActivity.length ? weeklyActivity : activityData} height={140} />
                   </motion.div>
 
                   {/* Languages */}
                   <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="p-4 bg-[#0c0c0f] border border-white/5 rounded-xl">
                     <h3 className="font-semibold text-white text-sm mb-3">Languages</h3>
                     <div className="flex justify-center">
-                      <FuturisticDonutChart data={languageData} size={120} />
+                      {/* Fix: use languages state (real data) not hardcoded languageData */}
+                      <FuturisticDonutChart data={languages.length ? languages : languageData} size={120} />
                     </div>
                   </motion.div>
                 </div>
@@ -1246,7 +1251,8 @@ export default function DashboardPage() {
                     <button onClick={() => setActiveSection("workspaces")} className="text-xs text-emerald-400 hover:text-emerald-300 cursor-pointer">View all →</button>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    {workspaces.slice(0, 4).map((workspace, i) => <WorkspaceCard key={workspace.id} workspace={workspace} delay={i * 0.05} onOpen={() => handleOpenWorkspace(workspace)} onDelete={() => handleDeleteClick(workspace)} onToggleStar={() => toggleStar(workspace.id)} formatDate={formatDate} />)}
+                    {/* Fix: normalize _id vs id for MongoDB docs */}
+                    {workspaces.slice(0, 4).map((workspace, i) => { const wsId = workspace._id || workspace.id; return <WorkspaceCard key={wsId} workspace={workspace} delay={i * 0.05} onOpen={() => handleOpenWorkspace(workspace)} onDelete={() => handleDeleteClick(workspace)} onToggleStar={() => toggleStar(wsId)} formatDate={formatDate} />; })}
                   </div>
                 </motion.div>
               </motion.div>
@@ -1255,9 +1261,9 @@ export default function DashboardPage() {
             {/* Workspaces Section */}
             {activeSection === "workspaces" && (
               <motion.div key="workspaces" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                <div className="flex items-center justify-between mb-6"><div><h2 className="text-xl font-bold text-white">All Workspaces</h2><p className="text-sm text-white/50">{workspaces.length} workspaces</p></div></div>
+                <div className="flex items-center justify-between mb-6"><div><h2 className="text-xl font-bold text-white">All Workspaces</h2><p className="text-sm text-white/50">{workspaces.length} workspace{workspaces.length !== 1 ? 's' : ''}</p></div></div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {workspaces.map((workspace, i) => <WorkspaceCard key={workspace.id} workspace={workspace} delay={i * 0.05} onOpen={() => handleOpenWorkspace(workspace)} onDelete={() => handleDeleteClick(workspace)} onToggleStar={() => toggleStar(workspace.id)} formatDate={formatDate} />)}
+                  {workspaces.map((workspace, i) => { const wsId = workspace._id || workspace.id; return <WorkspaceCard key={wsId} workspace={workspace} delay={i * 0.05} onOpen={() => handleOpenWorkspace(workspace)} onDelete={() => handleDeleteClick(workspace)} onToggleStar={() => toggleStar(wsId)} formatDate={formatDate} />; })}
                 </div>
               </motion.div>
             )}
@@ -1347,44 +1353,45 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 
-                {/* Activity Timeline */}
+                {/* Activity Timeline — real data from API */}
                 <div className="relative">
                   <div className="absolute left-6 top-0 bottom-0 w-0.5 bg-gradient-to-b from-emerald-500 via-cyan-500 to-violet-500" />
                   <div className="space-y-4">
-                    {[
-                      { id: 1, type: "commit", title: "Fixed authentication bug", desc: "Updated JWT token validation logic in auth middleware", workspace: "API Backend", time: "2 min ago", icon: "🔧", color: "emerald" },
-                      { id: 2, type: "collab", title: "Sarah Chen joined your session", desc: "Started live collaboration on React Dashboard", workspace: "React Dashboard", time: "15 min ago", icon: "👥", color: "cyan" },
-                      { id: 3, type: "deploy", title: "Production deployment successful", desc: "v2.4.1 deployed to production servers", workspace: "API Backend", time: "1 hour ago", icon: "🚀", color: "violet" },
-                      { id: 4, type: "commit", title: "Added new chart components", desc: "Implemented FuturisticBarChart and DonutChart", workspace: "React Dashboard", time: "2 hours ago", icon: "📊", color: "emerald" },
-                      { id: 5, type: "review", title: "Code review completed", desc: "Approved PR #42: Refactor database queries", workspace: "Python ML", time: "3 hours ago", icon: "✅", color: "cyan" },
-                      { id: 6, type: "create", title: "New workspace created", desc: "Mobile App UI workspace initialized", workspace: "Mobile App UI", time: "5 hours ago", icon: "✨", color: "violet" },
-                      { id: 7, type: "commit", title: "Optimized bundle size", desc: "Reduced production bundle by 40%", workspace: "React Dashboard", time: "Yesterday", icon: "📦", color: "emerald" },
-                      { id: 8, type: "collab", title: "Mike invited to workspace", desc: "Mike Johnson now has access to API Backend", workspace: "API Backend", time: "Yesterday", icon: "📧", color: "cyan" },
-                    ].map((activity, i) => (
-                      <motion.div
-                        key={activity.id}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.05 * i }}
-                        className="relative pl-14"
-                      >
-                        <div className={`absolute left-4 w-5 h-5 rounded-full flex items-center justify-center text-xs border-2 border-[#060608] ${
-                          activity.color === 'emerald' ? 'bg-emerald-500' : activity.color === 'cyan' ? 'bg-cyan-500' : 'bg-violet-500'
-                        }`}>
-                          {activity.icon}
-                        </div>
-                        <div className="p-4 bg-[#0c0c0f] border border-white/5 rounded-xl hover:border-white/10 transition-colors cursor-pointer group">
-                          <div className="flex items-start justify-between mb-2">
-                            <h4 className="font-medium text-white group-hover:text-emerald-400 transition-colors">{activity.title}</h4>
-                            <span className="text-xs text-white/40">{activity.time}</span>
+                    {activities.length === 0 ? (
+                      <div className="text-center py-12 text-white/40">
+                        <span className="text-4xl block mb-3">🗓️</span>
+                        <p>No activity yet. Start coding to see your history!</p>
+                      </div>
+                    ) : activities.map((activity, i) => {
+                      const colorMap = { commit: 'emerald', collab: 'cyan', create: 'violet', deploy: 'violet', review: 'cyan', edit: 'emerald' };
+                      const color = colorMap[activity.type] || 'emerald';
+                      return (
+                        <motion.div
+                          key={activity._id || activity.id || i}
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.04 * i }}
+                          className="relative pl-14"
+                        >
+                          <div className={`absolute left-4 w-5 h-5 rounded-full flex items-center justify-center text-xs border-2 border-[#060608] ${
+                            color === 'emerald' ? 'bg-emerald-500' : color === 'cyan' ? 'bg-cyan-500' : 'bg-violet-500'
+                          }`}>
+                            {activity.icon || '💻'}
                           </div>
-                          <p className="text-sm text-white/50 mb-2">{activity.desc}</p>
-                          <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 bg-white/5 rounded-lg text-white/50">
-                            📁 {activity.workspace}
-                          </span>
-                        </div>
-                      </motion.div>
-                    ))}
+                          <div className="p-4 bg-[#0c0c0f] border border-white/5 rounded-xl hover:border-white/10 transition-colors cursor-pointer group">
+                            <div className="flex items-start justify-between mb-2">
+                              <h4 className="font-medium text-white group-hover:text-emerald-400 transition-colors">{activity.message || activity.title}</h4>
+                              <span className="text-xs text-white/40">{activity.time || (activity.createdAt ? new Date(activity.createdAt).toLocaleDateString() : '')}</span>
+                            </div>
+                            {activity.workspaceName && (
+                              <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 bg-white/5 rounded-lg text-white/50">
+                                📁 {activity.workspaceName}
+                              </span>
+                            )}
+                          </div>
+                        </motion.div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -1499,9 +1506,9 @@ export default function DashboardPage() {
               <motion.div key="starred" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                 <h2 className="text-xl font-bold text-white mb-6">Starred Workspaces</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {workspaces.filter(w => w.starred).map((workspace, i) => <WorkspaceCard key={workspace.id} workspace={workspace} delay={i * 0.05} onOpen={() => handleOpenWorkspace(workspace)} onDelete={() => handleDeleteClick(workspace)} onToggleStar={() => toggleStar(workspace.id)} formatDate={formatDate} />)}
+                  {workspaces.filter(w => w.starred).map((workspace, i) => { const wsId = workspace._id || workspace.id; return <WorkspaceCard key={wsId} workspace={workspace} delay={i * 0.05} onOpen={() => handleOpenWorkspace(workspace)} onDelete={() => handleDeleteClick(workspace)} onToggleStar={() => toggleStar(wsId)} formatDate={formatDate} />; })}
                 </div>
-                {workspaces.filter(w => w.starred).length === 0 && <div className="text-center py-12"><span className="text-4xl mb-4 block">⭐</span><p className="text-white/50">No starred workspaces</p></div>}
+                {workspaces.filter(w => w.starred).length === 0 && <div className="text-center py-12"><span className="text-4xl mb-4 block">⭐</span><p className="text-white/50">No starred workspaces yet</p></div>}
               </motion.div>
             )}
           </AnimatePresence>
