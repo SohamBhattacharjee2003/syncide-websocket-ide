@@ -285,6 +285,20 @@ export default function EditorPage() {
     }
   }, [userName]); // Only depend on userName, not isInCall
 
+  // Cleanup on page unload/reload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (isInCall) {
+        stopAll();
+        cleanupWebRTC();
+        socket.emit("leave-video-call", { roomId, userName });
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isInCall, roomId, userName, stopAll, cleanupWebRTC]);
+
   // Broadcast media status whenever it changes
   useEffect(() => {
     if (!socket || !roomId || !isInCall) return;

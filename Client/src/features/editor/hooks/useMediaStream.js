@@ -25,8 +25,21 @@ export default function useMediaStream() {
     setLocalStream(stream);
     console.log("[useMediaStream] empty persistent stream created");
 
+    // Cleanup on unmount or page unload
+    const cleanup = () => {
+      console.log("[useMediaStream] Cleaning up all tracks");
+      persistentStreamRef.current?.getTracks().forEach((t) => {
+        t.stop();
+        console.log(`[useMediaStream] Stopped track: ${t.kind}`);
+      });
+      screenStream?.getTracks().forEach((t) => t.stop());
+    };
+
+    window.addEventListener('beforeunload', cleanup);
+
     return () => {
-      persistentStreamRef.current?.getTracks().forEach((t) => t.stop());
+      cleanup();
+      window.removeEventListener('beforeunload', cleanup);
     };
   }, []);
 
