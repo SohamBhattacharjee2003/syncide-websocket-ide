@@ -10,20 +10,24 @@ import { useState, useRef, useCallback, useEffect } from "react";
  *   - Screen tracks: separate stream, added/removed from WebRTC via a separate ref.
  */
 export default function useMediaStream() {
-  const persistentStreamRef = useRef(null); // The one stream handed to WebRTC
-  const [localStream, setLocalStream] = useState(null);
+  const persistentStreamRef = useRef(new MediaStream()); // Initialize immediately with empty stream
+  const [localStream, setLocalStream] = useState(() => new MediaStream()); // Initialize state with empty stream
   const [screenStream, setScreenStream] = useState(null);
   const [isMicOn, setIsMicOn] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const localVideoRef = useRef(null);
 
-  // ── Initialize on mount: create empty stream ──
+  // ── Initialize on mount: ensure stream exists ──
   useEffect(() => {
-    const stream = new MediaStream();
-    persistentStreamRef.current = stream;
-    setLocalStream(stream);
-    console.log("[useMediaStream] empty persistent stream created");
+    // Double-check stream exists
+    if (!persistentStreamRef.current) {
+      console.log("[useMediaStream] Creating missing stream on mount");
+      persistentStreamRef.current = new MediaStream();
+      setLocalStream(new MediaStream());
+    } else {
+      console.log("[useMediaStream] Stream already exists on mount");
+    }
 
     // Cleanup on unmount or page unload
     const cleanup = () => {
