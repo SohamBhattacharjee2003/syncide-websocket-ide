@@ -332,8 +332,12 @@ function ControlButton({ icon: Icon, onClick, active, danger, tooltip, rotate })
   const handleClick = (e) => {
     e.preventDefault();
     e.stopPropagation();
+    console.log(`[ControlButton] ${tooltip} clicked, active=${active}, danger=${danger}`);
     if (onClick) {
+      console.log(`[ControlButton] Calling onClick handler for ${tooltip}`);
       onClick();
+    } else {
+      console.warn(`[ControlButton] No onClick handler for ${tooltip}`);
     }
   };
 

@@ -54,7 +54,47 @@ export default function useMediaStream() {
 
     const audioTracks = stream.getAudioTracks();
 
-    if (audioTracks.length === 0) {
+    if (audioTracks.length > 0) {
+      // Audio track exists - check if we're turning OFF
+      const currentState = audioTracks[0].enabled;
+      
+      if (currentState) {
+        // Turning OFF - completely stop the track
+        console.log("[useMediaStream] Stopping mic track");
+        audioTracks.forEach((t) => {
+          t.stop();
+          stream.removeTrack(t);
+        });
+        setIsMicOn(false);
+        setLocalStream(new MediaStream(stream.getTracks()));
+        console.log("[useMediaStream] Mic stopped");
+      } else {
+        // Turning ON - need to request mic again
+        try {
+          console.log("[useMediaStream] Re-requesting audio permission...");
+          const audioStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { echoCancellation: true, noiseSuppression: true } 
+          });
+          
+          if (audioStream.getAudioTracks().length === 0) {
+            console.error("[useMediaStream] No audio tracks obtained");
+            return;
+          }
+
+          audioStream.getAudioTracks().forEach((t) => {
+            t.enabled = true;
+            stream.addTrack(t);
+          });
+          
+          setIsMicOn(true);
+          setLocalStream(new MediaStream(stream.getTracks()));
+          console.log("[useMediaStream] Mic re-enabled");
+        } catch (err) {
+          console.error("[useMediaStream] Cannot re-access mic:", err);
+          setIsMicOn(false);
+        }
+      }
+    } else {
       // First time - acquire audio
       try {
         console.log("[useMediaStream] Requesting audio permission...");
@@ -79,12 +119,6 @@ export default function useMediaStream() {
         console.error("[useMediaStream] Cannot access mic:", err);
         setIsMicOn(false);
       }
-    } else {
-      // Toggle existing audio
-      const newState = !audioTracks[0].enabled;
-      audioTracks.forEach((t) => (t.enabled = newState));
-      setIsMicOn(newState);
-      console.log(`[useMediaStream] mic toggled to ${newState}`);
     }
   }, []);
 
@@ -100,12 +134,54 @@ export default function useMediaStream() {
     const videoTracks = stream.getVideoTracks();
 
     if (videoTracks.length > 0) {
-      // Camera track exists — toggle enabled state
-      const newState = !videoTracks[0].enabled;
-      videoTracks.forEach((t) => (t.enabled = newState));
-      setIsCameraOn(newState);
-      setLocalStream(new MediaStream(stream.getTracks()));
-      console.log(`[useMediaStream] camera toggled to ${newState}`);
+      // Camera track exists — check if we're turning OFF
+      const currentState = videoTracks[0].enabled;
+      
+      if (currentState) {
+        // Turning OFF - completely stop the track to release camera
+        console.log("[useMediaStream] Stopping camera track to release hardware");
+        videoTracks.forEach((t) => {
+          t.stop();
+          stream.removeTrack(t);
+        });
+        setIsCameraOn(false);
+        setLocalStream(new MediaStream(stream.getTracks()));
+        console.log("[useMediaStream] Camera stopped and released");
+      } else {
+        // Turning ON - need to request camera again
+        try {
+          console.log("[useMediaStream] Re-requesting camera permission...");
+          const videoStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            } 
+          });
+
+          if (videoStream.getVideoTracks().length === 0) {
+            console.error("[useMediaStream] No video tracks obtained");
+            return;
+          }
+
+          videoStream.getVideoTracks().forEach((t) => {
+            t.enabled = true;
+            stream.addTrack(t);
+          });
+
+          setIsCameraOn(true);
+          
+          // Update local video preview
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = stream;
+          }
+
+          setLocalStream(new MediaStream(stream.getTracks()));
+          console.log("[useMediaStream] Camera re-enabled");
+        } catch (err) {
+          console.error("[useMediaStream] Cannot re-access camera:", err);
+          setIsCameraOn(false);
+        }
+      }
     } else {
       // First time — acquire camera
       try {
@@ -176,14 +252,33 @@ export default function useMediaStream() {
 
   // ── Stop all ──
   const stopAll = useCallback(() => {
-    persistentStreamRef.current?.getTracks().forEach((t) => t.stop());
-    persistentStreamRef.current = null;
-    setLocalStream(null);
-    screenStream?.getTracks().forEach((t) => t.stop());
+    console.log("[useMediaStream] stopAll called");
+    
+    // Stop all tracks in persistent stream
+    if (persistentStreamRef.current) {
+      persistentStreamRef.current.getTracks().forEach((t) => {
+        console.log(`[useMediaStream] Stopping ${t.kind} track, state: ${t.readyState}`);
+        t.stop();
+        t.enabled = false;
+      });
+      persistentStreamRef.current = new MediaStream(); // Reset to empty stream
+    }
+    
+    // Stop screen share
+    if (screenStream) {
+      screenStream.getTracks().forEach((t) => {
+        console.log(`[useMediaStream] Stopping screen track`);
+        t.stop();
+      });
+    }
+    
+    setLocalStream(new MediaStream());
     setScreenStream(null);
     setIsMicOn(false);
     setIsCameraOn(false);
     setIsScreenSharing(false);
+    
+    console.log("[useMediaStream] All tracks stopped");
   }, [screenStream]);
 
   return {
