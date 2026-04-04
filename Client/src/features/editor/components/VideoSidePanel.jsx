@@ -63,16 +63,18 @@ export default function VideoSidePanel({
       .filter(([id, data]) => {
         // Show ALL remote participants, don't filter by stream availability
         const userInfo = users.find(u => u.id === id);
-        const hasValidName = (data?.userName && data.userName !== "Participant") || userInfo?.name;
+        const userName = data?.userName || userInfo?.name;
+        const hasValidName = userName && userName !== "Participant" && userName.trim() !== "";
         
         console.log(`[VideoSidePanel] Checking peer ${id}:`, {
           hasValidName,
           userName: data?.userName,
           userInfoName: userInfo?.name,
-          hasStream: !!data?.stream
+          hasStream: !!data?.stream,
+          willShow: hasValidName && id !== "local"
         });
         
-        // Only filter out if it's the local user or has no valid name
+        // Only show if has valid name and not local
         return hasValidName && id !== "local";
       })
       .map(([id, data]) => {
