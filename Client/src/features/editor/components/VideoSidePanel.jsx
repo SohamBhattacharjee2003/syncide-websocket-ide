@@ -85,8 +85,8 @@ export default function VideoSidePanel({
           stream,
           name: participantName,
           isLocal: false,
-          isCameraOff: peerStatus.isCameraOn === false,
-          isMicOff: peerStatus.isMicOn === false,
+          isCameraOff: !peerStatus.isCameraOn, // If undefined or false, camera is off
+          isMicOff: !peerStatus.isMicOn,
           isHost: userInfo?.isHost || false
         };
       }),
@@ -282,10 +282,12 @@ function ParticipantTile({ stream, name, isLocal, isMuted, isCameraOff, isHost, 
   const videoRef = useRef(null);
 
   useEffect(() => {
+    console.log(`[ParticipantTile] ${name}: stream=${!!stream}, isCameraOff=${isCameraOff}, tracks=${stream?.getTracks().length}`);
     if (videoRef.current && stream) {
+      console.log(`[ParticipantTile] Setting srcObject for ${name}`);
       videoRef.current.srcObject = stream;
     }
-  }, [stream]);
+  }, [stream, name, isCameraOff]);
 
   const gradients = [
     "from-blue-500 to-blue-600",
