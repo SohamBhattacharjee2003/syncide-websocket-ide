@@ -63,9 +63,23 @@ export default function useWebRTC({ socket, roomId, userName, localStream }) {
     politeRef.current.set(peerId, isPolite);
     makingOffer.current.set(peerId, false);
 
-    // ── Pre-Warm Transceivers (Forces early negotiation of both media types) ──
-    pc.addTransceiver("audio", { direction: "sendrecv" });
-    pc.addTransceiver("video", { direction: "sendrecv" });
+    // ── Add local tracks immediately if available ──
+    const currentStream = localStreamRef.current;
+    if (currentStream) {
+      const audioTrack = currentStream.getAudioTracks()[0];
+      const videoTrack = currentStream.getVideoTracks()[0];
+      
+      console.log(`[WebRTC] Adding tracks to PC for ${peerId}: audio=${!!audioTrack}, video=${!!videoTrack}`);
+      
+      if (audioTrack) {
+        pc.addTrack(audioTrack, currentStream);
+      }
+      if (videoTrack) {
+        pc.addTrack(videoTrack, currentStream);
+      }
+    } else {
+      console.log(`[WebRTC] No local stream available yet for ${peerId}, will add tracks later`);
+    }
 
     // ── negotiation needed (Perfect Negotiation) ──
     pc.onnegotiationneeded = async () => {
@@ -316,49 +330,44 @@ export default function useWebRTC({ socket, roomId, userName, localStream }) {
   }, [socket, roomId, createPeerConnection, removePeer]);
 
   // ── HOT-SWAP TRACKS ───────────────────────────────────────────────────────
-  // Replaces the track on our pre-warmed transceivers instantly
+  // Update tracks when localStream changes
   
   useEffect(() => {
     const syncTracks = async () => {
-      const realAudio = localStream?.getAudioTracks()[0] || null;
-      const realVideo = localStream?.getVideoTracks()[0] || null;
+      if (!localStream) return;
+      
+      const realAudio = localStream.getAudioTracks()[0] || null;
+      const realVideo = localStream.getVideoTracks()[0] || null;
+
+      console.log(`[WebRTC] Syncing tracks to all peers: audio=${!!realAudio}, video=${!!realVideo}`);
 
       for (const [peerId, pc] of peersRef.current.entries()) {
         if (pc.signalingState === "closed") continue;
 
-        let changed = false;
-        pc.getTransceivers().forEach(tc => {
-          if (tc.receiver.track.kind === "audio") {
-            if (tc.sender.track !== realAudio) {
-              tc.sender.replaceTrack(realAudio).catch(e => console.error(e));
-              changed = true;
-            }
-          }
-          if (tc.receiver.track.kind === "video") {
-            if (tc.sender.track !== realVideo) {
-              tc.sender.replaceTrack(realVideo).catch(e => console.error(e));
-              changed = true;
-            }
-          }
-        });
+        const senders = pc.getSenders();
+        const audioSender = senders.find(s => s.track?.kind === "audio");
+        const videoSender = senders.find(s => s.track?.kind === "video");
 
-        // CRITICAL FIX: Chrome and Safari often freeze the byte pipeline when 
-        // replaceTrack swaps a null track for a live track because the SSRC changes.
-        // We MUST manually force an SDP renegotiation to update the packet decoders!
-        if (changed && pc.signalingState === "stable") {
-          try {
-            makingOffer.current.set(peerId, true);
-            await pc.setLocalDescription(); 
-            socketRef.current?.emit("video-offer", {
-              roomId: roomIdRef.current,
-              offer:  pc.localDescription,
-              to:     peerId,
-            });
-          } catch (e) {
-            console.error("[WebRTC] explicit renegotiation error:", e);
-          } finally {
-            makingOffer.current.set(peerId, false);
+        // Replace or add audio track
+        if (audioSender) {
+          if (audioSender.track !== realAudio) {
+            console.log(`[WebRTC] Replacing audio track for ${peerId}`);
+            await audioSender.replaceTrack(realAudio).catch(e => console.error(e));
           }
+        } else if (realAudio) {
+          console.log(`[WebRTC] Adding audio track for ${peerId}`);
+          pc.addTrack(realAudio, localStream);
+        }
+
+        // Replace or add video track
+        if (videoSender) {
+          if (videoSender.track !== realVideo) {
+            console.log(`[WebRTC] Replacing video track for ${peerId}`);
+            await videoSender.replaceTrack(realVideo).catch(e => console.error(e));
+          }
+        } else if (realVideo) {
+          console.log(`[WebRTC] Adding video track for ${peerId}`);
+          pc.addTrack(realVideo, localStream);
         }
       }
     };
