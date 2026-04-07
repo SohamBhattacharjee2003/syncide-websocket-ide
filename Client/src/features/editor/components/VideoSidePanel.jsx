@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo, memo } from "react";
 import {
   VscUnmute,
   VscMute,
@@ -40,60 +40,61 @@ export default function VideoSidePanel({
     }
   }, [localStream]);
 
-  const participants = Array.from(
-    remoteStreams instanceof Map ? remoteStreams.entries() : Object.entries(remoteStreams)
-  );
-  
-  console.log('[VideoSidePanel] Remote streams:', remoteStreams);
-  console.log('[VideoSidePanel] Participants array:', participants);
-  console.log('[VideoSidePanel] Users from socket:', users);
-  console.log('[VideoSidePanel] Peer statuses:', peerStatuses);
-  
-  const allParticipants = [
-    { 
+  const allParticipants = useMemo(() => {
+    const participants = Array.from(
+      remoteStreams instanceof Map ? remoteStreams.entries() : Object.entries(remoteStreams)
+    ).filter(([id]) => id !== "local");
+    
+    console.log('[VideoSidePanel] Remote streams:', remoteStreams);
+    console.log('[VideoSidePanel] Participants array:', participants);
+    console.log('[VideoSidePanel] Users from socket:', users);
+    console.log('[VideoSidePanel] Peer statuses:', peerStatuses);
+    
+    // Create a Map to deduplicate participants by ID
+    const participantMap = new Map();
+    
+    // Add local participant
+    participantMap.set("local", { 
       id: "local", 
       stream: localStream, 
       name: userName || "You", 
       isLocal: true,
       isCameraOff: !isCameraOn,
       isMicOff: !isMicOn,
-      isHost: users.find(u => u.name === userName)?.isHost || false
-    },
-    ...participants
-      .filter(([id, data]) => {
-        // Show ALL remote participants, don't filter by stream availability
-        const userInfo = users.find(u => u.id === id);
-        const userName = data?.userName || userInfo?.name;
-        const hasValidName = userName && userName !== "Participant" && userName.trim() !== "";
-        
-        console.log(`[VideoSidePanel] Checking peer ${id}:`, {
-          hasValidName,
-          userName: data?.userName,
-          userInfoName: userInfo?.name,
-          hasStream: !!data?.stream,
-          willShow: hasValidName && id !== "local"
-        });
-        
-        // Only show if has valid name and not local
-        return hasValidName && id !== "local";
-      })
-      .map(([id, data]) => {
-        const stream = data?.stream ?? data;
-        const userInfo = users.find(u => u.id === id);
-        const participantName = data?.userName || userInfo?.name || "Participant";
-        const peerStatus = peerStatuses?.get?.(id) || {};
-        
-        return {
-          id,
-          stream,
-          name: participantName,
-          isLocal: false,
-          isCameraOff: !peerStatus.isCameraOn, // If undefined or false, camera is off
-          isMicOff: !peerStatus.isMicOn,
-          isHost: userInfo?.isHost || false
-        };
-      }),
-  ];
+      isHost: users.find(u => u.name === userName)?.isHost || false,
+      isInCall: true
+    });
+    
+    // Add remote participants (deduplicated)
+    participants.forEach(([id, data]) => {
+      if (id === "local" || participantMap.has(id)) return;
+      
+      const userInfo = users.find(u => u.id === id);
+      const stream = data?.stream instanceof MediaStream ? data.stream : (data instanceof MediaStream ? data : null);
+      const participantName = userInfo?.name || data?.userName || "Participant";
+      const peerStatus = peerStatuses?.get?.(id) || {};
+      
+      console.log(`[VideoSidePanel] Adding peer ${id}:`, {
+        hasStream: !!stream,
+        isMediaStream: stream instanceof MediaStream,
+        tracks: stream?.getTracks().length || 0,
+        name: participantName
+      });
+      
+      participantMap.set(id, {
+        id,
+        stream,
+        name: participantName,
+        isLocal: false,
+        isCameraOff: !peerStatus.isCameraOn,
+        isMicOff: !peerStatus.isMicOn,
+        isHost: userInfo?.isHost || false,
+        isInCall: userInfo?.hasVideo || false
+      });
+    });
+    
+    return Array.from(participantMap.values());
+  }, [remoteStreams, localStream, userName, isCameraOn, isMicOn, users, peerStatuses]);
 
   // Collapsed state
   if (!isOpen) {
@@ -197,14 +198,47 @@ export default function VideoSidePanel({
 
       {/* Content */}
       <AnimatePresence mode="wait">
-        {/* Always show participants - no join prompt */}
-        <motion.div
-          key="call"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="flex-1 flex flex-col min-h-0"
-        >
+        {!isInCall ? (
+          /* Not in call - Join prompt */
+          <motion.div
+            key="join"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex-1 flex flex-col items-center justify-center p-6"
+          >
+            <div className="text-center mb-6">
+              <div className="w-20 h-20 rounded-full bg-[#3c4043] flex items-center justify-center mx-auto mb-4">
+                <HiOutlineVideoCamera className="w-10 h-10 text-[#9aa0a6]" />
+              </div>
+              <h3 className="text-white text-lg font-medium mb-2">Ready to join?</h3>
+              <p className="text-[#9aa0a6] text-sm">Start video call with your team</p>
+            </div>
+            
+            <motion.button
+              onClick={() => {
+                console.log('[VideoSidePanel] Join Call button clicked');
+                onStartCall?.();
+              }}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#1a73e8] to-[#1557b0] text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all"
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              <HiOutlineVideoCamera className="w-5 h-5" />
+              <span>Join Call</span>
+            </motion.button>
+            
+            <p className="text-[#9aa0a6] text-xs mt-4">Camera and mic will turn on</p>
+          </motion.div>
+        ) : (
+          /* In call - Show participants */
+          <motion.div
+            key="call"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex-1 flex flex-col min-h-0"
+          >
           {/* Participants List - Scrollable */}
           <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
             {allParticipants.map((participant, index) => (
@@ -216,6 +250,7 @@ export default function VideoSidePanel({
                 isMuted={participant.isMicOff}
                 isCameraOff={participant.isCameraOff}
                 isHost={participant.isHost}
+                isInCall={participant.isInCall}
                 index={index}
               />
             ))}
@@ -274,28 +309,48 @@ export default function VideoSidePanel({
               <span className="w-12 text-center">Leave</span>
             </div>
           </div>
-        </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
     </motion.div>
   );
 }
 
 // Participant tile component - Google Meet style
-function ParticipantTile({ stream, name, isLocal, isMuted, isCameraOff, isHost, index }) {
+const ParticipantTile = memo(function ParticipantTile({ stream, name, isLocal, isMuted, isCameraOff, isHost, index, isInCall }) {
   const videoRef = useRef(null);
+  const [videoTracks, setVideoTracks] = useState(0);
 
   useEffect(() => {
-    // Validate stream is a MediaStream object
     const isValidStream = stream && stream instanceof MediaStream;
     const trackCount = isValidStream ? stream.getTracks().length : 0;
+    const audioTracks = isValidStream ? stream.getAudioTracks().length : 0;
+    const videoTracksCount = isValidStream ? stream.getVideoTracks().length : 0;
     
-    console.log(`[ParticipantTile] ${name}: stream=${!!stream}, isValidStream=${isValidStream}, isCameraOff=${isCameraOff}, tracks=${trackCount}`);
+    setVideoTracks(videoTracksCount);
+    
+    console.log(`[ParticipantTile] ${name}:`, {
+      hasStream: !!stream,
+      isValidStream,
+      isCameraOff,
+      totalTracks: trackCount,
+      audioTracks,
+      videoTracks: videoTracksCount,
+      isLocal
+    });
     
     if (videoRef.current && isValidStream) {
       console.log(`[ParticipantTile] Setting srcObject for ${name}`);
       videoRef.current.srcObject = stream;
+      
+      // Force play for remote videos
+      if (!isLocal) {
+        videoRef.current.play().catch(e => {
+          console.warn(`[ParticipantTile] Play failed for ${name}:`, e);
+        });
+      }
     }
-  }, [stream, name, isCameraOff]);
+  }, [stream, name, isCameraOff, isLocal]);
 
   const gradients = [
     "from-blue-500 to-blue-600",
@@ -314,13 +369,15 @@ function ParticipantTile({ stream, name, isLocal, isMuted, isCameraOff, isHost, 
       className="relative aspect-video rounded-xl overflow-hidden bg-[#3c4043] group"
     >
       {/* Video or Avatar */}
-      {stream && stream instanceof MediaStream && !isCameraOff ? (
+      {stream && stream instanceof MediaStream && videoTracks > 0 && !isCameraOff ? (
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted={isLocal}
           className={`w-full h-full object-cover ${isLocal ? "transform -scale-x-100" : ""}`}
+          onLoadedMetadata={() => console.log(`[ParticipantTile] Video loaded for ${name}`)}
+          onError={(e) => console.error(`[ParticipantTile] Video error for ${name}:`, e)}
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-[#3c4043]">
@@ -343,15 +400,20 @@ function ParticipantTile({ stream, name, isLocal, isMuted, isCameraOff, isHost, 
             {isLocal ? "You" : name}
           </span>
           {isHost && (
-            <span className="px-1.5 py-0.5 bg-blue-500/80 text-white text-[9px] rounded font-medium">
+            <span className="px-1.5 py-0.5 bg-amber-500/80 text-white text-[9px] rounded font-medium">
               Host
+            </span>
+          )}
+          {!isLocal && isInCall && (
+            <span className="px-1.5 py-0.5 bg-emerald-500/80 text-white text-[9px] rounded font-medium">
+              In Call
             </span>
           )}
         </div>
       </div>
     </motion.div>
   );
-}
+});
 
 // Control button - Google Meet style
 function ControlButton({ icon: Icon, onClick, active, danger, tooltip, rotate }) {

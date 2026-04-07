@@ -4,12 +4,19 @@ import { useNavigate } from "react-router-dom";
 import { VscTerminal, VscAdd, VscArrowRight } from "react-icons/vsc";
 import { useAuth } from "../../../shared/context/AuthContext";
 
-export default function JoinRoomModal({ open, isOpen, onClose }) {
-  const [roomId, setRoomId] = useState("");
+export default function JoinRoomModal({ open, isOpen, onClose, roomId: propRoomId }) {
+  const [roomId, setRoomId] = useState(propRoomId || "");
   const [isCreating, setIsCreating] = useState(false);
   const navigate = useNavigate();
   const { user } = useAuth();
   const displayName = user?.username || user?.name || "";
+
+  // Update roomId if prop changes
+  useEffect(() => {
+    if (propRoomId) {
+      setRoomId(propRoomId);
+    }
+  }, [propRoomId]);
 
   // Store auth username in localStorage so socket can use it
   useEffect(() => {
@@ -108,7 +115,7 @@ export default function JoinRoomModal({ open, isOpen, onClose }) {
           {/* Room ID */}
           <div>
             <label className="block text-sm text-neutral-400 mb-2">
-              Room ID
+              Room ID {propRoomId && <span className="text-emerald-400">(Current Room)</span>}
             </label>
             <div className="flex gap-2">
               <input

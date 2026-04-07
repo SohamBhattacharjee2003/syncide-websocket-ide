@@ -108,7 +108,7 @@ function setupSocket(io) {
       // Clean stale participants BEFORE adding new one
       cleanStaleParticipants(io, normalizedRoomId);
 
-      // Check if this socket is already in the room (reconnection)
+      // Check if this socket is already in the room (reconnection/reload)
       const existingIndex = roomParticipants[normalizedRoomId].findIndex((u) => u.id === socket.id);
       
       if (existingIndex >= 0) {
@@ -150,11 +150,8 @@ function setupSocket(io) {
 
       console.log(`[Join] Room ${normalizedRoomId} now has ${roomParticipants[normalizedRoomId].length} participants`);
       
-      // Auto-join video call after a short delay
-      setTimeout(() => {
-        console.log(`[Auto-Join] Triggering auto video call join for ${userName} (${socket.id})`);
-        socket.emit("auto-join-video-call", { roomId: normalizedRoomId, userName });
-      }, 2000);
+      // Don't auto-trigger video call - let user manually join
+      console.log(`[Join] User ${userName} joined room ${normalizedRoomId}, waiting for manual video call join`);
     });
 
     // ── CODE SYNC ────────────────────────────────────────────────────────────
@@ -222,6 +219,12 @@ function setupSocket(io) {
         }
       }
 
+      // Request media status from the new joiner after a short delay
+      setTimeout(() => {
+        console.log(`[Video] Requesting media status from ${socket.id}`);
+        io.to(socket.id).emit("request-media-status", { from: "server" });
+      }, 1000);
+
       console.log(`[Video] Room ${normalizedRoomId} now has ${peers.size} video participants`);
     });
 
@@ -270,6 +273,7 @@ function setupSocket(io) {
     socket.on("request-media-status", ({ roomId }) => {
       const normalizedRoomId = roomId?.toString().toUpperCase();
       if (!normalizedRoomId) return;
+      console.log(`[Media] Broadcasting media status request in room ${normalizedRoomId}`);
       socket.to(normalizedRoomId).emit("request-media-status", { from: socket.id });
     });
 

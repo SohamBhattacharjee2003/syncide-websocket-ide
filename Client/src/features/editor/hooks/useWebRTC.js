@@ -117,42 +117,53 @@ export default function useWebRTC({ socket, roomId, userName, localStream }) {
     // ── remote tracks ──
     pc.ontrack = ({ track, streams }) => {
       console.log(`[WebRTC] ontrack(${track.kind}) from ${peerId} stream count = ${streams.length}`);
+      console.log(`[WebRTC] Track details:`, {
+        trackId: track.id,
+        trackKind: track.kind,
+        trackEnabled: track.enabled,
+        trackReadyState: track.readyState,
+        streamId: streams[0]?.id
+      });
       
       setRemoteStreams(prev => {
         const m = new Map(prev);
-        const existingInfo = m.get(peerId);
+        const existingInfo = m.get(peerId) || {};
         let nextStream;
         
-        // Native Transceivers do NOT perfectly join the same MediaStream by default unless explicitly attached.
-        if (existingInfo && existingInfo.stream) {
+        if (existingInfo.stream) {
           const currentTracks = existingInfo.stream.getTracks();
-          if (!currentTracks.includes(track)) {
-            // CRITICAL BUG FIX: Do NOT mutate nextStream.addTrack(track)
-            // Creating a new MediaStream changes the stream ID, forcing React's <video> key to remount!
+          const trackExists = currentTracks.some(t => t.id === track.id);
+          if (!trackExists) {
             nextStream = new MediaStream([...currentTracks, track]);
+            console.log(`[WebRTC] Added ${track.kind} track to existing stream for ${peerId}`);
           } else {
             nextStream = existingInfo.stream;
+            console.log(`[WebRTC] Track ${track.id} already exists for ${peerId}, skipping`);
           }
         } else {
-          // No stream yet, so initialize it with this track
-          // ALWAYS create a fresh MediaStream to ensure stable IDs
           const initialTracks = streams[0] ? streams[0].getTracks() : [];
-          if (!initialTracks.includes(track)) initialTracks.push(track);
+          const trackExists = initialTracks.some(t => t.id === track.id);
+          if (!trackExists) initialTracks.push(track);
           nextStream = new MediaStream(initialTracks);
+          console.log(`[WebRTC] Created new stream with ${track.kind} track for ${peerId}`);
         }
 
-        
         m.set(peerId, { 
-          ...existingInfo, // Preserve existing metadata like userName
+          ...existingInfo,
           stream: nextStream, 
           lastUpdate: Date.now() 
         });
+        
+        console.log(`[WebRTC] Remote stream updated for ${peerId}:`, {
+          audioTracks: nextStream.getAudioTracks().length,
+          videoTracks: nextStream.getVideoTracks().length
+        });
+        
         return m;
       });
 
-      // Purely auxiliary
-      track.onmute = () => {};
-      track.onunmute = () => {};
+      track.onmute = () => console.log(`[WebRTC] Track muted: ${track.kind} from ${peerId}`);
+      track.onunmute = () => console.log(`[WebRTC] Track unmuted: ${track.kind} from ${peerId}`);
     };
 
     // ── connection state ──
@@ -204,6 +215,10 @@ export default function useWebRTC({ socket, roomId, userName, localStream }) {
 
     const handleUserJoined = ({ peerId, userName }) => {
       console.log(`[WebRTC] User joined: ${peerId} (${userName})`);
+      if (peersRef.current.has(peerId)) {
+        console.log(`[WebRTC] Peer ${peerId} already exists, skipping duplicate`);
+        return;
+      }
       const pc = createPeerConnection(peerId, false); // existing peer -> impolite
       
       // Store the userName with the peer's data
@@ -216,6 +231,12 @@ export default function useWebRTC({ socket, roomId, userName, localStream }) {
 
       // CRITICAL: Add local tracks immediately if available
       const currentStream = localStreamRef.current;
+      console.log(`[WebRTC] Current stream for ${peerId}:`, {
+        hasStream: !!currentStream,
+        audioTracks: currentStream?.getAudioTracks().length || 0,
+        videoTracks: currentStream?.getVideoTracks().length || 0,
+      });
+      
       if (currentStream) {
         const audioTrack = currentStream.getAudioTracks()[0];
         const videoTrack = currentStream.getVideoTracks()[0];
@@ -236,17 +257,24 @@ export default function useWebRTC({ socket, roomId, userName, localStream }) {
             pc.dispatchEvent(new Event('negotiationneeded'));
           }
         }, 100);
+      } else {
+        console.warn(`[WebRTC] No local stream available for ${peerId}`);
       }
 
       // Broadcast current media status to the new joiner
       const currentMic = currentStream?.getAudioTracks().some(t => t.enabled && t.readyState === 'live') ?? false;
       const currentCam = currentStream?.getVideoTracks().some(t => t.enabled && t.readyState === 'live') ?? false;
+      console.log(`[WebRTC] Broadcasting status to ${peerId}: mic=${currentMic}, cam=${currentCam}`);
       socket.emit("media-status-changed", { roomId, isMicOn: currentMic, isCameraOn: currentCam });
     };
 
     const handleExistingPeers = (peers) => {
       console.log(`[WebRTC] Received existing peers:`, peers);
       peers.forEach(({ peerId, userName }) => {
+        if (peersRef.current.has(peerId)) {
+          console.log(`[WebRTC] Peer ${peerId} already exists, skipping duplicate`);
+          return;
+        }
         console.log(`[WebRTC] Creating connection for existing peer: ${peerId} (${userName})`);
         const pc = createPeerConnection(peerId, true); // joiner -> polite
         

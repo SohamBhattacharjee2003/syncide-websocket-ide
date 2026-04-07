@@ -218,6 +218,8 @@ function VideoTile({ stream, name, isLocal, isMuted, isCameraOff, isHost, index 
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
+      // Ensure video plays
+      videoRef.current.play().catch(e => console.log('[VideoTile] Play error:', e));
     }
   }, [stream]);
 

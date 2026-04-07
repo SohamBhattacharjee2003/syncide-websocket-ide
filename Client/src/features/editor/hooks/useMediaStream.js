@@ -20,17 +20,10 @@ export default function useMediaStream() {
 
   // ── Initialize on mount: ensure stream exists ──
   useEffect(() => {
-    // Double-check stream exists
-    if (!persistentStreamRef.current) {
-      console.log("[useMediaStream] Creating missing stream on mount");
-      persistentStreamRef.current = new MediaStream();
-      setLocalStream(new MediaStream());
-    } else {
-      console.log("[useMediaStream] Stream already exists on mount");
-    }
+    console.log("[useMediaStream] Initialized with empty stream");
 
-    // Cleanup on unmount or page unload
-    const cleanup = () => {
+    // Cleanup on unmount
+    return () => {
       console.log("[useMediaStream] Cleaning up all tracks");
       persistentStreamRef.current?.getTracks().forEach((t) => {
         t.stop();
@@ -38,14 +31,7 @@ export default function useMediaStream() {
       });
       screenStream?.getTracks().forEach((t) => t.stop());
     };
-
-    window.addEventListener('beforeunload', cleanup);
-
-    return () => {
-      cleanup();
-      window.removeEventListener('beforeunload', cleanup);
-    };
-  }, []);
+  }, [screenStream]);
 
   // ── Toggle microphone ──
   const toggleMic = useCallback(async () => {
@@ -81,7 +67,11 @@ export default function useMediaStream() {
         try {
           console.log("[useMediaStream] Re-requesting audio permission...");
           const audioStream = await navigator.mediaDevices.getUserMedia({ 
-            audio: { echoCancellation: true, noiseSuppression: true } 
+            audio: { 
+              echoCancellation: true, 
+              noiseSuppression: true,
+              autoGainControl: true
+            } 
           });
           
           if (audioStream.getAudioTracks().length === 0) {
@@ -107,7 +97,11 @@ export default function useMediaStream() {
       try {
         console.log("[useMediaStream] Requesting audio permission...");
         const audioStream = await navigator.mediaDevices.getUserMedia({ 
-          audio: { echoCancellation: true, noiseSuppression: true } 
+          audio: { 
+            echoCancellation: true, 
+            noiseSuppression: true,
+            autoGainControl: true
+          } 
         });
         
         if (audioStream.getAudioTracks().length === 0) {

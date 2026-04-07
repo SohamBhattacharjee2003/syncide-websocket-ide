@@ -42,7 +42,7 @@ export default function VideoPanel({
     }
   }, [localStream]);
 
-  const participants = Object.entries(remoteStreams);
+  const participants = Object.entries(remoteStreams).filter(([id]) => id !== "local");
 
   return (
     <motion.div
@@ -271,6 +271,8 @@ function RemoteVideo({ stream, name }) {
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
+      // Ensure video plays
+      videoRef.current.play().catch(e => console.log('[RemoteVideo] Play error:', e));
     }
   }, [stream]);
 

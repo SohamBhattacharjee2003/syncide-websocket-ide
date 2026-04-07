@@ -258,24 +258,7 @@ export default function EditorPage() {
     cleanup: cleanupWebRTC,
   } = useWebRTC({ socket, roomId, userName, localStream });
   
-  // DEVELOPMENT MODE: Enable loopback for same-device testing
-  const isDevelopmentMode = import.meta.env.DEV;
-  const [showLoopback, setShowLoopback] = useState(false);
-  
-  // Create fake remote stream for testing on same device
-  const fakeRemoteStreams = new Map();
-  if (isDevelopmentMode && showLoopback && localStream) {
-    // Add a fake remote participant with your own stream
-    fakeRemoteStreams.set('fake-peer-1', {
-      stream: localStream,
-      userName: 'Test User (Loopback)',
-      isMicOn: isMicOn,
-      isCameraOn: isCameraOn,
-    });
-  }
-  
-  // Merge real and fake streams
-  const displayStreams = new Map([...remoteStreams, ...fakeRemoteStreams]);
+
 
   // Auto-start video call when user joins room - DISABLED, now triggered by backend
   // useEffect(() => {
@@ -283,43 +266,24 @@ export default function EditorPage() {
   //   ...
   // }, [userName]);
 
-  // Cleanup on page unload/reload
+  // Cleanup on page unload/reload - NO AUTO RESTART
   useEffect(() => {
     const handleBeforeUnload = (e) => {
       console.log('[EditorPage] Page unloading, cleaning up...');
       if (isInCall) {
-        // Don't actually leave - just cleanup local resources
         stopAll();
-        // Don't emit leave-video-call on reload, only on actual close
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        console.log('[EditorPage] Page hidden');
-      } else {
-        console.log('[EditorPage] Page visible, checking call state');
-        // Rejoin if needed
-        if (isInCall && !localStream) {
-          console.log('[EditorPage] Rejoining call after visibility change');
-          setTimeout(() => {
-            toggleCamera();
-            toggleMic();
-          }, 500);
-        }
+        socket.emit("leave-video-call", { roomId, userName });
       }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
     
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [isInCall, localStream, stopAll, toggleCamera, toggleMic]);
+  }, [isInCall, stopAll, roomId, userName]);
 
-  // Broadcast media status whenever it changes
+  // Broadcast media status whenever it changes - DON'T leave call on camera off
   useEffect(() => {
     if (!socket || !roomId || !isInCall) return;
     
@@ -329,9 +293,30 @@ export default function EditorPage() {
       isMicOn, 
       isCameraOn 
     });
+    
+    // DON'T leave call when camera/mic is off - just broadcast status
   }, [isMicOn, isCameraOn, isInCall, roomId]);
 
-  // Socket connection
+  // Save handler
+  const handleSave = useCallback(() => {
+    setIsSyncing(true);
+    socket.emit("code-change", { roomId, code });
+    setTimeout(() => setIsSyncing(false), 500);
+  }, [roomId, code]);
+
+  // Keyboard shortcut - Ctrl+S to save
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        handleSave();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleSave]);
+
+  // Run handler
   useEffect(() => {
     if (!userName) return;
     
@@ -348,42 +333,28 @@ export default function EditorPage() {
       console.log('[EditorPage] Received room-users:', userList);
       setUsers(userList);
     });
-    
-    // Listen for auto-join video call trigger from backend
-    socket.on("auto-join-video-call", ({ roomId: triggerRoomId, userName: triggerUserName }) => {
-      console.log('[EditorPage] Received auto-join-video-call trigger from backend');
-      if (!isInCall) {
-        console.log('[EditorPage] Triggering video call join...');
-        const autoJoin = async () => {
-          try {
-            await toggleCamera();
-            await toggleMic();
-            await new Promise(resolve => setTimeout(resolve, 500));
-            joinCall();
-            setIsInCall(true);
-            setIsVideoPanelOpen(true);
-            console.log('[EditorPage] Auto-joined via backend trigger');
-          } catch (error) {
-            console.error('[EditorPage] Auto-join failed:', error);
-          }
-        };
-        autoJoin();
-      }
-    });
 
-    socket.on("connect", () => setIsConnected(true));
-    socket.on("disconnect", () => setIsConnected(false));
+    socket.on("connect", () => {
+      console.log('[EditorPage] Socket connected');
+      setIsConnected(true);
+    });
+    
+    socket.on("disconnect", () => {
+      console.log('[EditorPage] Socket disconnected');
+      setIsConnected(false);
+    });
 
     // Cleanup on unmount
     return () => {
       socket.off("code-update");
       socket.off("room-users");
-      socket.off("auto-join-video-call");
       socket.off("connect");
       socket.off("disconnect");
       
       // Clean up video call if active
       if (isInCall) {
+        console.log('[EditorPage] Cleaning up on unmount');
+        leaveCall();
         stopAll();
         cleanupWebRTC();
       }
@@ -433,20 +404,21 @@ export default function EditorPage() {
     setLanguage(lang);
     setFileName(extensions[lang] || "untitled");
     
-    // Update code with language-specific boilerplate
-    if (boilerplates[lang]) {
+    // Only set boilerplate if the editor is empty or still has the default JS boilerplate.
+    // NEVER overwrite code that collaborators have written.
+    const currentCode = code.trim();
+    const isEmptyOrDefault =
+      !currentCode ||
+      currentCode === boilerplates["javascript"].trim() ||
+      currentCode === boilerplates[language]?.trim();
+
+    if (isEmptyOrDefault && boilerplates[lang]) {
       setCode(boilerplates[lang]);
+      socket.emit("code-change", { roomId, code: boilerplates[lang] });
     }
-  }, []);
+  }, [code, language, roomId]);
 
-  // Save handler
-  const handleSave = useCallback(() => {
-    setIsSyncing(true);
-    socket.emit("code-change", { roomId, code });
-    setTimeout(() => setIsSyncing(false), 500);
-  }, [roomId, code]);
-
-  // Run handler
+  // Socket connection
   const handleRun = useCallback(() => {
     setIsTerminalOpen(true);
     // Add run logic here
@@ -483,25 +455,57 @@ export default function EditorPage() {
   }, [isInCall]);
 
   const handleEndCall = useCallback(() => {
+    console.log('[EditorPage] Ending call - user clicked Leave button');
+    
+    // Stop all media first
     stopAll();
+    
+    // Leave WebRTC call
+    leaveCall();
     cleanupWebRTC();
+    
+    // Update state
     setIsInCall(false);
     setShowVideoCall(false);
     
-    // Notify others
+    // Notify server
     socket.emit("leave-video-call", { roomId, userName });
-  }, [roomId, userName, cleanupWebRTC, stopAll]);
+    
+    console.log('[EditorPage] Call ended successfully');
+  }, [roomId, userName, leaveCall, cleanupWebRTC, stopAll]);
 
-  const handleStartCall = useCallback(() => {
-    if (!isInCall) {
+  const handleStartCall = useCallback(async () => {
+    if (isInCall) {
+      console.log('[EditorPage] Already in call');
+      return;
+    }
+    
+    try {
+      console.log('[EditorPage] Starting call manually...');
+      
+      // First join the WebRTC call (without media)
+      console.log('[EditorPage] Joining WebRTC call...');
       joinCall();
       setIsInCall(true);
       setIsVideoPanelOpen(true);
+      
+      // Then turn on camera
+      console.log('[EditorPage] Turning on camera...');
+      await toggleCamera();
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Then turn on mic
+      console.log('[EditorPage] Turning on mic...');
+      await toggleMic();
+      
+      console.log('[EditorPage] Call started successfully');
+    } catch (error) {
+      console.error('[EditorPage] Failed to start call:', error);
     }
-  }, [isInCall, joinCall]);
+  }, [isInCall, joinCall, toggleCamera, toggleMic]);
 
   if (showJoinModal) {
-    return <JoinRoomModal open={true} onClose={handleJoinModalClose} />;
+    return <JoinRoomModal open={true} onClose={handleJoinModalClose} roomId={roomId} />;
   }
 
   return (
@@ -548,36 +552,6 @@ export default function EditorPage() {
         user={user}
       />
       
-      {/* Development Mode: Loopback Toggle */}
-      {isDevelopmentMode && isInCall && (
-        <div className="fixed top-20 left-4 z-50">
-          <motion.button
-            onClick={() => {
-              console.log('[Loopback] Toggling loopback mode:', !showLoopback);
-              setShowLoopback(!showLoopback);
-            }}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-lg ${
-              showLoopback 
-                ? 'bg-emerald-500 text-white ring-2 ring-emerald-400' 
-                : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-            }`}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            title="Toggle loopback mode for testing on same device"
-          >
-            {showLoopback ? '🔄 Loopback ON' : '🔄 Enable Loopback'}
-          </motion.button>
-          {showLoopback && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mt-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs text-emerald-400"
-            >
-              Test mode: Your video is mirrored
-            </motion.div>
-          )}
-        </div>
-      )}
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden relative z-10">
@@ -617,7 +591,7 @@ export default function EditorPage() {
                 isOpen={isVideoPanelOpen}
                 onToggle={() => setIsVideoPanelOpen(!isVideoPanelOpen)}
                 localStream={localStream}
-                remoteStreams={displayStreams}
+                remoteStreams={remoteStreams}
                 peerStatuses={peerStatuses}
                 isCameraOn={isCameraOn}
                 isMicOn={isMicOn}
@@ -708,7 +682,7 @@ export default function EditorPage() {
           onClose={() => setShowVideoCall(false)}
           localStream={localStream}
           screenStream={screenStream}
-          remoteStreams={displayStreams}
+          remoteStreams={remoteStreams}
           isCameraOn={isCameraOn}
           isMicOn={isMicOn}
           isScreenSharing={isScreenSharing}
